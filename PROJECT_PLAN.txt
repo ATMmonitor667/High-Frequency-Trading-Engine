@@ -1,0 +1,470 @@
+================================================================================
+ HIGH-FREQUENCY TRADING SYSTEM  -  PROJECT PLAN & BUILD GUIDE (C++)
+ Author/Owner: Rahat
+ Status: Planning -> Build (target: complete by end of summer)
+ Mentor notes: This is a roadmap, not the code. You build it; this guides you
+               when you are stuck. Read the "HOW TO USE THIS DOC" section first.
+================================================================================
+
+
+--------------------------------------------------------------------------------
+0. HOW TO USE THIS DOCUMENT
+--------------------------------------------------------------------------------
+- Read sections 1-3 to understand WHAT you are building and WHY each piece exists.
+- Section 4 is the folder structure (already scaffolded on disk next to this file).
+- Section 5 is the week-by-week build plan. Treat each phase as a milestone you
+  can demo and commit. Do NOT skip ahead - each phase depends on the last.
+- Section 6 is the "extension" (CUDA + Machine Learning). This lives in its own
+  /extension folder and is OPTIONAL until the core works. It is your "wow" layer.
+- Section 7 is the recruiter playbook - how to make this look elite on a resume.
+- Section 8 is the resource list (open-source projects, books, articles) so you
+  can compare your design against what real people have shipped.
+
+Golden rule: get a SLOW correct version working end-to-end first, then optimize
+with measurements. "Make it work, make it right, make it fast" - in that order.
+
+
+--------------------------------------------------------------------------------
+1. WHAT IS THIS PROJECT?
+--------------------------------------------------------------------------------
+A High-Frequency Trading (HFT) system is software that ingests live market data,
+maintains its own view of the market (the order book), runs trading strategies
+that decide when to buy/sell, and sends orders to an exchange - all in
+microseconds. The whole game is LATENCY and CORRECTNESS under load.
+
+You are building a self-contained simulation of this entire pipeline in C++.
+Because you (probably) do not have a real exchange connection or colocation, you
+will also build a small EXCHANGE SIMULATOR so your trading engine has something
+real to talk to. This is exactly how professionals test before going live, and
+it makes the project fully runnable on a laptop - which matters for demos.
+
+The core data path you are building (the "hot path"):
+
+   [Exchange Sim] --market data--> [Feed Handler] --> [Order Book]
+        ^                                                   |
+        |                                                   v
+        |                                            [Strategy Engine]
+        |                                                   |
+        |                                                   v
+        +---- orders / fills ----[Order Gateway]<----[Risk Checks]
+
+Five things make it "HFT" and not just "a trading bot":
+  1. A limit order book with price-time priority and O(1)/O(log n) operations.
+  2. A matching engine that pairs buyers and sellers deterministically.
+  3. Lock-free / wait-free data structures on the hot path (no mutex stalls).
+  4. Cache-friendly memory layout + custom allocators (no malloc in hot path).
+  5. Rigorous, reproducible latency benchmarking (you measure nanoseconds).
+
+
+--------------------------------------------------------------------------------
+2. CORE CONCEPTS YOU MUST UNDERSTAND (the vocabulary)
+--------------------------------------------------------------------------------
+- LIMIT ORDER BOOK (LOB): the list of all resting buy orders (bids) and sell
+  orders (asks), sorted by price. Best bid = highest buy. Best ask = lowest sell.
+  The gap between them is the SPREAD.
+
+- PRICE-TIME PRIORITY: orders match by best price first; ties broken by who
+  arrived first (FIFO). Your engine must respect this exactly.
+
+- ORDER TYPES (start with the first two): LIMIT, MARKET, then later CANCEL,
+  MODIFY, IOC (immediate-or-cancel), FOK (fill-or-kill).
+
+- MATCHING ENGINE: takes an incoming order and matches it against the opposite
+  side of the book, generating TRADES (fills) and updating the book.
+
+- MARKET DATA FEED: the stream of events (new order, cancel, trade) the exchange
+  broadcasts. Your FEED HANDLER decodes it and updates your local book.
+
+- TICK-TO-TRADE LATENCY: time from receiving a market data tick to sending your
+  order. This is THE number HFT firms care about. You will measure it.
+
+- LOCK-FREE QUEUE (SPSC ring buffer): how threads hand work to each other without
+  locks. The single-producer/single-consumer ring buffer is your workhorse.
+
+- BACKTESTING vs REPLAY: feed historical data through your system to evaluate a
+  strategy's P&L offline before "going live" against the simulator.
+
+
+--------------------------------------------------------------------------------
+3. SYSTEM ARCHITECTURE (the components, one folder each)
+--------------------------------------------------------------------------------
+common/        Core primitives reused everywhere: fixed-point Price type,
+               timestamps (rdtsc / steady_clock), Order/Trade structs, enums,
+               lock-free SPSC & MPSC ring buffers, memory pool allocator,
+               branch hints (likely/unlikely), cache-line alignment helpers.
+
+core/orderbook/        The limit order book data structure. Add/cancel/modify
+                       orders; query best bid/ask and depth. This is the heart.
+
+core/matching_engine/  Consumes orders, matches against the book, emits trades.
+                       Deterministic, single-threaded hot loop.
+
+marketdata/            Feed handler + decoders. Parses incoming messages (start
+                       with a simple binary or JSON format, later a compact
+                       binary protocol) into internal events.
+
+network/               TCP/UDP transport. Start with plain sockets; later add
+                       busy-polling, kernel-bypass concepts (io_uring), and
+                       multicast for market data.
+
+strategy/              Pluggable strategy interface + sample strategies:
+                       market-making, mean-reversion, and a momentum/signal
+                       strategy. Strategies see book updates, emit orders.
+
+execution/order_gateway/  Sends orders out and handles acknowledgements/fills.
+
+risk/                  Pre-trade risk checks: max position, max order size,
+                       price collars, kill switch. Runs BEFORE every order.
+
+logging/               Low-latency async logger (hot path only writes to a ring
+                       buffer; a background thread does the I/O).
+
+config/                Config loading (symbols, ports, risk limits, strategy
+                       params) from a file so nothing is hard-coded.
+
+apps/exchange_sim/     A standalone exchange simulator: accepts orders, runs a
+                       matching engine, broadcasts market data. Your test venue.
+
+apps/trading_engine/   The main binary: wires feed handler -> book -> strategy
+                       -> risk -> gateway and runs the live loop.
+
+apps/replay/           Replays recorded/historical data for backtesting.
+
+benchmarks/            Microbenchmarks (Google Benchmark) for order book ops,
+                       ring buffer throughput, and end-to-end tick-to-trade.
+
+tests/                 Unit tests (order book correctness, matching rules) and
+                       integration tests (engine vs simulator round trips).
+
+
+--------------------------------------------------------------------------------
+4. FOLDER STRUCTURE (already created on disk alongside this file)
+--------------------------------------------------------------------------------
+High Frequency Trading System/
+|-- PROJECT_PLAN.txt              <- this file
+|-- README.md                     <- write this AFTER phase 1 (recruiters read it)
+|-- CMakeLists.txt                <- top-level build
+|-- include/hft/                  <- public headers (if you split lib/app)
+|-- src/
+|   |-- common/                   Price, Time, Order, ring buffers, mem pool
+|   |-- core/
+|   |   |-- orderbook/            limit order book
+|   |   |-- matching_engine/      matching logic
+|   |-- marketdata/
+|   |   |-- feed_handler/         turns wire messages into events
+|   |   |-- decoders/             protocol parsers
+|   |-- network/                  sockets / transport
+|   |-- strategy/                 strategy interface + sample strategies
+|   |-- execution/
+|   |   |-- order_gateway/        outbound order handling
+|   |-- risk/                     pre-trade risk checks
+|   |-- logging/                  async low-latency logger
+|   |-- config/                   config parsing
+|-- apps/
+|   |-- exchange_sim/             the simulated venue
+|   |-- trading_engine/          main live trading binary
+|   |-- replay/                   historical replay / backtester
+|-- tests/
+|   |-- unit/
+|   |-- integration/
+|-- benchmarks/                   latency + throughput microbenchmarks
+|-- data/
+|   |-- samples/                  sample/recorded market data
+|-- scripts/                      build/run/bench helper scripts
+|-- docs/                         design docs, architecture diagrams, results
+|-- third_party/                  external libs (gtest, benchmark, etc.)
+|-- extension/                    <- CUDA + MACHINE LEARNING (the "wow" layer)
+    |-- cuda/
+    |   |-- kernels/              GPU kernels (parallel backtest, indicators)
+    |   |-- include/
+    |-- ml/
+    |   |-- features/             feature engineering from order book
+    |   |-- training/             model training (Python/PyTorch ok here)
+    |   |-- inference/            C++ inference on hot path (ONNX/LibTorch)
+    |   |-- models/               saved/exported models
+    |-- docs/                     extension design notes & results
+
+
+--------------------------------------------------------------------------------
+5. END-TO-END BUILD PLAN (phased; each phase = a commit + a demo)
+--------------------------------------------------------------------------------
+Tooling baseline (set up once, Phase 0):
+  - Language: C++20 (or C++23 if your compiler supports it). Compiler: GCC/Clang.
+  - Build: CMake. Test: GoogleTest. Bench: Google Benchmark. Format: clang-format.
+  - OS: Linux (HFT is Linux; use WSL2 if you are on Windows). Sanitizers: ASan,
+    TSan, UBSan in debug builds. CI: GitHub Actions (build + test on every push).
+  - Version control: git from commit #1. Small, frequent, well-described commits.
+
+PHASE 0 - Foundations (week 1)
+  Goal: a building, testing, CI-green skeleton.
+  - Set up CMake, GoogleTest, Google Benchmark, clang-format, GitHub Actions.
+  - Implement common/ primitives: a fixed-point Price (avoid floats for money),
+    a Timestamp (wrap rdtsc and std::chrono), and Order/Trade/Side enums/structs.
+  - Write your first unit tests (Price arithmetic, ordering).
+  Demo: "make && ctest" passes; CI badge green on GitHub.
+
+PHASE 1 - The Limit Order Book (weeks 2-3)  *** the heart ***
+  Goal: a correct, fast single-threaded order book.
+  - Data structure: map price-level -> FIFO queue of orders. Start with
+    std::map for price levels (clear, O(log n)). Add/cancel/modify; best bid/ask.
+  - Add an O(1) lookup from orderId -> location for fast cancels.
+  - Heavy unit tests: price-time priority, partial fills, cancels, edge cases.
+  Demo: feed a script of orders, print the book; tests prove correctness.
+  Later optimization (revisit in Phase 8): replace std::map with a flat array of
+  price levels indexed by ticks for cache-friendly O(1) access.
+
+PHASE 2 - The Matching Engine (week 4)
+  Goal: turn incoming orders into trades deterministically.
+  - Implement matching: incoming aggressive order walks the opposite side,
+    generating fills until filled or no more liquidity; remainder rests (LIMIT)
+    or is dropped (IOC/MARKET).
+  - Emit a Trade stream and updated book state.
+  - Tests: known sequences -> known fills (build a golden-file test).
+  Demo: order sequence in -> trades + final book out, matching by hand-check.
+
+PHASE 3 - The Exchange Simulator (week 5)
+  Goal: a venue your engine can talk to over the network.
+  - apps/exchange_sim: wrap the matching engine behind a TCP/UDP server.
+  - Define a simple wire protocol (binary struct first; document it).
+  - It accepts orders and broadcasts market data (book/trade updates).
+  Demo: telnet/netcat or a tiny client sends orders; sim responds with fills.
+
+PHASE 4 - Market Data Feed Handler (week 6)
+  Goal: consume the sim's feed and rebuild the book locally.
+  - marketdata/feed_handler + decoders: parse wire messages into events.
+  - Maintain a local mirror of the order book from the feed.
+  - Verify your mirrored book matches the simulator's book exactly.
+  Demo: run sim + feed handler; assert book consistency over thousands of msgs.
+
+PHASE 5 - Strategy Engine + Risk + Gateway (weeks 7-8)
+  Goal: close the loop - react to data and send orders.
+  - strategy/: define an interface (onBookUpdate, onTrade -> emit orders).
+    Implement a simple market-making strategy (quote both sides around mid) and
+    a mean-reversion strategy.
+  - risk/: pre-trade checks (max position, max order size, price collar, kill
+    switch). Every order passes through risk before the gateway.
+  - execution/order_gateway/: send orders to the sim, handle acks/fills, update
+    positions and P&L.
+  Demo: strategy trades against the sim; print running P&L and position.
+
+PHASE 6 - Backtester / Replay (week 9)
+  Goal: evaluate strategies offline on recorded data.
+  - apps/replay: read recorded data from data/samples, feed it through the same
+    strategy code path, produce P&L, Sharpe, max drawdown, fill stats.
+  - Record real or synthetic data into data/samples (write a recorder in the
+    feed handler).
+  Demo: a backtest report (numbers + a simple equity-curve plot in docs/).
+
+PHASE 7 - Low-Latency Concurrency (week 10)
+  Goal: split into threads connected by lock-free queues; no locks on hot path.
+  - common/ SPSC ring buffer between feed handler -> strategy -> gateway.
+  - Pin threads to cores; busy-poll instead of sleeping on the hot path.
+  - Async logger: hot path only enqueues; background thread writes.
+  Demo: throughput and latency improve measurably vs Phase 5 (show before/after).
+
+PHASE 8 - Optimization & Benchmarking (week 11)  *** the resume gold ***
+  Goal: measure, then make it fast - with evidence.
+  - benchmarks/: Google Benchmark for order book add/cancel/match and ring
+    buffer throughput. Build an end-to-end tick-to-trade latency histogram
+    (record timestamps; report p50/p99/p99.9 in nanoseconds).
+  - Optimizations to try, each measured: flat-array order book, custom memory
+    pool (no malloc on hot path), cache-line alignment + false-sharing fixes,
+    branch hints, removing virtual calls on the hot path, prefetching.
+  - Use perf, perf stat, and Linux perf counters; consider Intel VTune.
+  Demo: a docs/PERFORMANCE.md with a latency table and flamegraphs. Numbers like
+  "p99 tick-to-trade reduced from X us to Y us" are exactly what recruiters want.
+
+PHASE 9 - Polish & Presentation (week 12)
+  Goal: make it look like a product, not a homework assignment.
+  - README.md with architecture diagram, build/run instructions, GIF/screenshot
+    of it running, and the headline performance numbers up top.
+  - docs/ARCHITECTURE.md with the design and trade-off discussion.
+  - Clean code, consistent style, CI green, good test coverage.
+  - Optional: a small live dashboard (book depth, P&L, latency) via a web UI.
+
+
+--------------------------------------------------------------------------------
+6. THE EXTENSION FOLDER: CUDA + MACHINE LEARNING (optional, high-impact)
+--------------------------------------------------------------------------------
+Everything here lives under /extension and is built SEPARATELY from the core so
+the core stays clean and dependency-free. Only start this after Phase 6+ works.
+
+IMPORTANT REALITY CHECK (say this in your README - it shows maturity):
+GPUs are NOT used for the ultra-low-latency hot path of real HFT, because the
+CPU<->GPU transfer adds microseconds and GPUs are bad at branchy, single-event
+logic. GPUs ARE used in trading for: (a) massively parallel BACKTESTING and
+simulation, (b) TRAINING ML models, and (c) batch feature computation / research.
+So position CUDA correctly - as research/backtest acceleration, not as "I put the
+order book on a GPU." Knowing this distinction itself impresses interviewers.
+
+6A. CUDA (extension/cuda/)
+  Project ideas, easiest to hardest:
+  1. GPU-accelerated backtesting: run thousands of strategy parameter
+     combinations in parallel on historical data. This is the classic, legit
+     "100x faster than CPU" win and is genuinely useful.
+  2. Parallel Monte Carlo: price options or simulate many market scenarios.
+  3. Parallel technical-indicator / feature computation across many symbols and
+     time windows at once (feeds the ML side).
+  Deliverable: a CPU vs GPU benchmark table in extension/docs (e.g., "swept
+  10,000 parameter sets in N seconds on GPU vs M minutes on CPU").
+  Skills shown: CUDA kernels, memory coalescing, host/device transfer, Thrust.
+
+6B. MACHINE LEARNING (extension/ml/)
+  Pipeline:
+  1. features/: engineer features from the order book - order-book imbalance,
+     micro-price, spread, recent trade flow, rolling volatility. (This is where
+     most of the real edge and learning is.)
+  2. training/: train a model to predict short-horizon price direction (next
+     tick up/down) or mid-price move. Start simple: logistic regression / gradient
+     boosting (XGBoost), then a small LSTM/MLP. Python + PyTorch is fine HERE.
+  3. inference/: export the trained model (ONNX or TorchScript) and run inference
+     from C++ using ONNX Runtime or LibTorch, so a strategy can call predict().
+  4. Wire a "signal strategy" in the core strategy/ folder that uses the model's
+     prediction (run it through the SAME risk checks and backtester).
+  Deliverable: a backtest comparing the ML strategy vs the baseline strategies,
+  with honest metrics (accuracy, P&L, Sharpe, drawdown) and a discussion of
+  overfitting / look-ahead bias. Honesty about limitations reads as senior.
+  Skills shown: feature engineering, model training, C++/ML integration, ONNX,
+  realistic evaluation.
+
+Suggested extension build order:
+  E1. ML features from your recorded data (extension/ml/features).
+  E2. Train + evaluate a baseline classifier offline (extension/ml/training).
+  E3. Export model; run inference in C++ (extension/ml/inference); add signal
+      strategy to the core and backtest it.
+  E4. CUDA-accelerated parameter-sweep backtester (extension/cuda).
+  E5. (Stretch) CUDA feature computation feeding the ML pipeline.
+
+
+--------------------------------------------------------------------------------
+7. RECRUITER PLAYBOOK - HOW TO MAKE THIS IMPRESSIVE
+--------------------------------------------------------------------------------
+What HFT / quant recruiters actually look for (from research below): depth over
+breadth, measurable results, low-level mastery, and evidence you can dig into a
+hard problem. Translate that into concrete moves:
+
+7A. Lead with NUMBERS. The single most powerful thing you can do.
+  - "Limit order book sustaining N million operations/sec."
+  - "p99 tick-to-trade latency of X microseconds (measured, histogram in repo)."
+  - "Lock-free SPSC queue at Y million msgs/sec; reduced p99 latency by Z%."
+  - "GPU parameter sweep: 10,000 backtests in N s vs M min on CPU (100x)."
+  Put the top 3 numbers at the very top of the README.
+
+7B. Show the LOW-LEVEL chops recruiters screen for:
+  - Lock-free data structures, cache-line alignment / false-sharing fixes,
+    custom memory pool (no malloc on hot path), branch prediction hints, reading
+    assembly / perf counters for hot loops. Document each with a before/after.
+
+7C. Make it RUNNABLE and VISIBLE:
+  - One-command build and run (scripts/). A GIF or screenshot of it trading.
+    Recruiters spend ~60 seconds on a repo - the README must sell it instantly.
+  - Architecture diagram in the README. Clear, professional.
+
+7D. Prove ENGINEERING MATURITY:
+  - CI green badge, unit + integration tests, sanitizers, clang-format, clear
+    commit history. This separates you from "it works on my machine" projects.
+
+7E. Prove you understand the DOMAIN, not just code:
+  - A docs/DESIGN.md discussing trade-offs (why std::map then flat array; why
+    GPUs are NOT on the hot path; how you avoid look-ahead bias in backtests).
+    Showing you know WHY is what gets you past interviews.
+
+7F. Resume bullet templates (fill in YOUR numbers):
+  - "Built a low-latency HFT system in C++20 (order book, matching engine,
+     market-data feed handler, strategy + risk engine) achieving p99 tick-to-
+     trade latency of <X us>."
+  - "Designed lock-free SPSC/MPSC ring buffers and a custom memory pool,
+     eliminating hot-path allocations and cutting p99 latency by <Z%>."
+  - "Implemented a GPU-accelerated backtester (CUDA) that swept <N> strategy
+     configurations <100x> faster than the CPU baseline."
+  - "Trained and deployed an order-book-imbalance ML signal (ONNX Runtime in
+     C++) and backtested it against baseline strategies."
+
+7G. Talk about it well: be ready to whiteboard the order book, explain your
+  latency measurements, and discuss what you'd do with more time. Depth wins.
+
+
+--------------------------------------------------------------------------------
+8. RESOURCES - OTHER PEOPLE'S PROJECTS, BOOKS, ARTICLES
+--------------------------------------------------------------------------------
+Study these for ideas and to compare your design. Do NOT copy - read, understand,
+then build your own and cite them as inspiration in your README.
+
+OPEN-SOURCE HFT / TRADING SYSTEMS (C++):
+- nyarosu/hft - low-latency HFT in C++ from scratch: custom lock-free structures,
+  TCP lib, memory allocators. Closest in spirit to this project.
+  https://github.com/nyarosu/hft
+- 0burak/imperial_hft - low-latency techniques, design patterns, benchmarked.
+  https://github.com/0burak/imperial_hft
+- keyianpai/hft - strategy + exchange API + backtest + tools.
+  https://github.com/keyianpai/hft
+- MR-DHRUV/Cpp-Trading-System - ultra-low-latency execution, real-time data,
+  WebSocket order-book streaming via Deribit API.
+  https://github.com/MR-DHRUV/Cpp-Trading-System
+- FLOX - C++ framework for building trading systems.
+  https://github.com/eeiaao/flox
+- GitHub topics to browse: https://github.com/topics/hft  and
+  https://github.com/topics/high-frequency-trading
+
+LIMIT ORDER BOOK / MATCHING ENGINE REFERENCES:
+- brprojects/Limit-Order-Book - C++ LOB + matching engine, 1.4M+ tx/sec.
+  https://github.com/brprojects/Limit-Order-Book
+- jacklu2030/TradingEngine-Ultra-Low-Latency - O(1) execution/update/cancel.
+  https://github.com/jacklu2030/TradingEngine-Ultra-Low-Latency
+- mansoor-mamnoon/limit-order-book - C++ core + Python SDK, 20M+ msgs/sec,
+  data replay, VWAP/TWAP/POV + market-making backtests.
+  https://github.com/mansoor-mamnoon/limit-order-book
+- joaquinbejar/OrderBook-rs - (Rust) thread-safe lock-free LOB; good design read.
+  https://github.com/joaquinbejar/OrderBook-rs
+- "Designing Low Latency High Performance Order Matching Engine" (Medium).
+  https://medium.com/@amitava.webwork/designing-low-latency-high-performance-order-matching-engine-a07bd58594f4
+
+BOOK (highly recommended - basically a guided version of this project):
+- "Building Low Latency Applications with C++" by Sourav Ghosh (O'Reilly/Packt).
+  https://www.oreilly.com/library/view/building-low-latency/9781837639359/B19434_Preface_eBook.xhtml
+
+CUDA / GPU + ML IN TRADING:
+- NVIDIA: "Benchmarking Deep Neural Networks for Low-Latency Trading and Rapid
+  Backtesting on NVIDIA GPUs."
+  https://developer.nvidia.com/blog/benchmarking-deep-neural-networks-for-low-latency-trading-and-rapid-backtesting-on-nvidia-gpus/
+- NVIDIA: "GPU-Accelerate Algorithmic Trading Simulations by over 100x with Numba."
+  https://developer.nvidia.com/blog/gpu-accelerate-algorithmic-trading-simulations-by-over-100x-with-numba/
+- "Machine Learning in Trading: the CPU-GPU latency problem" (quantblog) - read
+  this to understand WHY GPUs are not on the hot path.
+  https://quantblog.wordpress.com/2025/10/05/machine-learning-in-trading-the-cpu-gpu-latency-problem/
+- QuantInsti: "NVIDIA GPU RAPIDS libraries for trading."
+  https://blog.quantinsti.com/nvidia-gpu-rapids-libraries-trading/
+
+CAREER / PORTFOLIO GUIDANCE:
+- cybergeekgyan/Quant-Developers-Resources - interview + skill prep for quant/HFT.
+  https://github.com/cybergeekgyan/Quant-Developers-Resources
+- OpenQuant: "Quantitative Finance Portfolio Projects."
+  https://openquant.co/blog/quantitative-finance-portfolio-projects
+- QuantInsti: "How to Get Into High-Frequency Trading."
+  https://www.quantinsti.com/articles/get-into-high-frequency-trading/
+
+LIBRARIES YOU'LL LIKELY USE:
+- GoogleTest (unit tests), Google Benchmark (microbench), CMake (build),
+  spdlog or your own async logger, ONNX Runtime / LibTorch (ML inference in C++),
+  Thrust (CUDA), perf / VTune (profiling).
+
+
+--------------------------------------------------------------------------------
+9. DEFINITION OF DONE (what "completed" means)
+--------------------------------------------------------------------------------
+Core (must-have):
+  [ ] Correct limit order book + matching engine, well tested.
+  [ ] Exchange simulator + feed handler with verified book consistency.
+  [ ] At least 2 strategies + risk checks + order gateway, trading vs the sim.
+  [ ] Backtester producing P&L / Sharpe / drawdown reports.
+  [ ] Lock-free hot path + async logging.
+  [ ] Benchmark suite with a tick-to-trade latency histogram (p50/p99/p99.9).
+  [ ] README with diagram, build/run steps, and headline numbers; CI green.
+
+Extension (stretch / wow):
+  [ ] ML feature pipeline + trained signal model + C++ inference + backtest.
+  [ ] CUDA-accelerated parameter-sweep backtester with CPU-vs-GPU benchmark.
+
+When all the must-haves are checked, you have a portfolio-defining project.
+Ship it, write the README like it matters, and talk about the numbers.
+================================================================================
