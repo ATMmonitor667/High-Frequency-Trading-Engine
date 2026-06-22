@@ -11,13 +11,7 @@
 
 namespace hft {
 
-// Fixed-capacity object pool with O(1) allocate and O(1) release.
-//
-// Free slots are threaded onto an intrusive singly-linked free list. Because
-// `storage` is the first member of Slot, the T* handed out by allocate() is
-// bit-identical to the Slot* it lives in, so release() recovers the owning slot
-// by pointer arithmetic -- no scan. This keeps the hot path allocation-free and
-// branch-light (no malloc, no search).
+
 template<typename T, std::uint64_t poolSize>
 class MemoryPool {
     struct Slot {
