@@ -1,13 +1,23 @@
 #pragma once
 
+#include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <new>
+#include <utility>
 #include <vector>
 
 #include "types.h"
 
 namespace hft {
 
+// Fixed-capacity object pool with O(1) allocate and O(1) release.
+//
+// Free slots are threaded onto an intrusive singly-linked free list. Because
+// `storage` is the first member of Slot, the T* handed out by allocate() is
+// bit-identical to the Slot* it lives in, so release() recovers the owning slot
+// by pointer arithmetic -- no scan. This keeps the hot path allocation-free and
+// branch-light (no malloc, no search).
 template<typename T, std::uint64_t poolSize>
 class MemoryPool {
     struct Slot {
@@ -16,9 +26,17 @@ class MemoryPool {
         Slot* next   = nullptr;
     };
 
+    static_assert(offsetof(Slot, storage) == 0,
+                  "storage must be the first member so a T* maps back to its Slot");
+
     Slot*             freeSlot = nullptr;
     std::vector<Slot> slots;
     std::size_t       used = 0;
+
+    Slot* slotOf(T* ptr) noexcept {
+        return reinterpret_cast<Slot*>(reinterpret_cast<unsigned char*>(ptr) -
+                                       offsetof(Slot, storage));
+    }
 
 public:
     MemoryPool() : slots(poolSize) {
@@ -29,29 +47,32 @@ public:
         freeSlot = &slots[0];
     }
 
-    T* allocate(uint64_t id, Side side, double price, long qty) {
+    template<typename... Args>
+    T* allocate(Args&&... args) {
         if (!freeSlot) return nullptr;
         Slot* slot = freeSlot;
         freeSlot = freeSlot->next;
         slot->isUsed = true;
         ++used;
-        return new (slot->storage) T(id, side, price, qty);
+        return new (slot->storage) T(std::forward<Args>(args)...);
     }
 
     void release(T* ptr) {
         if (!ptr) return;
-        for (std::uint64_t i = 0; i < poolSize; ++i) {
-            T* inSlot = reinterpret_cast<T*>(slots[i].storage);
-            if (slots[i].isUsed && inSlot == ptr) {
-                ptr->~T();
-                slots[i].isUsed = false;
-                slots[i].next = freeSlot;
-                freeSlot = &slots[i];
-                --used;
-                return;
-            }
-        }
+        Slot* slot = slotOf(ptr);
+        assert(slot >= slots.data() && slot < slots.data() + poolSize &&
+               "pointer does not belong to this pool");
+        if (!slot->isUsed) return;  // guard against double free
+
+        ptr->~T();
+        slot->isUsed = false;
+        slot->next = freeSlot;
+        freeSlot = slot;
+        --used;
     }
+
+    std::size_t size() const noexcept { return used; }
+    std::size_t capacity() const noexcept { return poolSize; }
 };
 
 }  // namespace hft
