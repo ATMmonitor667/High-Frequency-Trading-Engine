@@ -1,1 +1,6 @@
 Quant Math/
+
+# Local notes / planning docs (not part of the buildable project)
+*.py
+*.txt
+
