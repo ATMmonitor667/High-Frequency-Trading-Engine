@@ -9,7 +9,8 @@
 // Standalone tests for the market data FeedHandler.
 // Build & run:
 //   g++ -std=c++17 tests/unit/test_feed_handler.cpp
-//       src/marketdata/feed_handler/feed_handler.cpp -o test_feed && ./test_feed
+//       src/marketdata/feed_handler/feed_handler.cpp
+//       src/marketdata/decoders/pitch_decoder.cpp -o test_feed && ./test_feed
 
 namespace {
 

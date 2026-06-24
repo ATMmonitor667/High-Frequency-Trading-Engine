@@ -14,7 +14,7 @@
 //   - Each message has a 1-byte type tag followed by a fixed-size body
 //   - Gaps in sequence numbers mean lost packets -> trigger gap-fill request
 //
-//   UDP bytes -> processPacket -> dispatchMsg -> jumpTable -> parseXxx
+//   UDP bytes -> processPacket -> dispatchMsg -> jumpTable -> PitchDecoder
 //             -> FeedMessage -> cb_ -> downstream builder
 
 #include <cstddef>
@@ -81,7 +81,7 @@ static constexpr uint8_t MSG_ADD    = 0x01;
 static constexpr uint8_t MSG_CANCEL = 0x02;
 static constexpr uint8_t MSG_TRADE  = 0x03;
 
-// Fixed wire body sizes (must match parseAdd / parseCancel / parseTrade field order).
+// Fixed wire body sizes (must match PitchDecoder field order in decoders/).
 static constexpr uint8_t ADD_BODY_LEN    = 31;  // 8+6+1+8+8
 static constexpr uint8_t CANCEL_BODY_LEN = 22;  // 8+6+8
 static constexpr uint8_t TRADE_BODY_LEN  = 30;  // 8+6+8+8
@@ -150,10 +150,6 @@ public:
     void dispatchMsg(const uint8_t* msg, uint8_t type);
     void processPacket(const uint8_t* buf, size_t len);
 
-    AddOrderMsg    parseAdd(const uint8_t* msg);
-    CancelOrderMsg parseCancel(const uint8_t* msg);
-    TradeMsg       parseTrade(const uint8_t* msg);
-
     void requestRetransmit(uint64_t fromSeq, uint64_t toSeq);
 
 private:
@@ -168,8 +164,6 @@ private:
     these functions parse and call cb_ — they don't touch the order book directly.
     */
     ParseFn jumpTable_[256] = {};
-
-    static bool bodyLenOk(uint8_t type, uint8_t len);
 
     static void staticParseAdd(FeedHandler* self, const uint8_t* msg);
     static void staticParseCancel(FeedHandler* self, const uint8_t* msg);
