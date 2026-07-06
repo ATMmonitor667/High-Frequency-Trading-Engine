@@ -60,10 +60,12 @@ std::optional<OrderRequest> StrategyEngine::onBookUpdate(const BookUpdate& u) {
     lastOrderTsNs_ = u.tsNs;
     const bool buy = score > cfg_.threshold;
     return OrderRequest{
+        nextClientOrderId_++,             // unique id for dedupe downstream
         u.symbol,
         buy ? Side::BUY : Side::SELL,
-        buy ? u.askPx : u.bidPx,  // cross the spread to take liquidity
-        cfg_.orderQty};
+        buy ? u.askPx : u.bidPx,          // cross the spread to take liquidity
+        cfg_.orderQty,
+        u.tsNs};
 }
 
 double StrategyEngine::computeMomentum() const {

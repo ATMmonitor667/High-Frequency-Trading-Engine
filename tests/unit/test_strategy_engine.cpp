@@ -10,8 +10,8 @@
 // Standalone unit tests for StrategyEngine + book_adapter (no test framework).
 //
 // Build & run:
-//   g++ -std=c++17 tests/unit/test_strategy_engine.cpp \
-//       src/strategy/strategy_engine.cpp \
+//   g++ -std=c++17 tests/unit/test_strategy_engine.cpp
+//       src/strategy/strategy_engine.cpp
 //       src/marketdata/book_builder/order_book_builder.cpp -o test_strat && ./test_strat
 //
 // Exit code is 0 only if every check passes (CI-friendly).

@@ -1,12 +1,38 @@
 #pragma once
 
-
+// ==========================================================================
+// Strategy Engine  (alpha signals -> order intents, zero-alloc hot path)
+// ==========================================================================
+// Concepts: ring buffers, no-alloc hot path, alpha signals, feature engineering
+//
+// The Strategy Engine is the "brain" of the trading system (PROJECT_PLAN
+// Phase 5). On every top-of-book update it recomputes a set of alpha signals,
+// combines them into a directional score in [-1, +1], and when the score
+// crosses a threshold emits an OrderRequest for the Order Gateway.
+//
+// PIPELINE (where this file sits):
+//
+//   Exchange Sim
+//     -> UDP bytes
+//         -> FeedHandler (marketdata/feed_handler)     decode + gap detect
+//             -> OrderBookBuilder (marketdata/book_builder)   apply -> L2 depth
+//                 -> StrategyEngine (HERE)             signals -> order intents
+//                     -> OrderGateway (execution/)     send + acks/fills
+//
+// The engine is zero-allocation in the hot path -- no heap operations after
+// construction. All state lives in pre-allocated ring buffers.
+//
+// FEEDING THE ENGINE:
+//   The engine consumes a BookUpdate (top-of-book snapshot). The upstream
+//   OrderBookBuilder exposes getLevel()/isStale() rather than a BookUpdate, so
+//   book_adapter.h bridges the two: it reads the best bid/ask into a BookUpdate
+//   and refuses to trade while the book is stale. See book_adapter.h.
 
 #include <cstdint>
 #include <optional>
 #include <string>
 
-#include "../common/types.h"  // hft::Side
+#include "../common/types.h"  // hft::Side, hft::OrderRequest
 
 namespace hft {
 
@@ -35,14 +61,9 @@ struct BookUpdate {
     double  mid() const { return (bidPx + askPx) * 0.5; }
 };
 
-// An order intent emitted by the engine. side==BUY when score crosses +threshold,
-// side==SELL when it crosses -threshold. Consumed by the OrderGateway.
-struct OrderRequest {
-    std::string symbol;
-    Side        side;
-    double      px;
-    long        qty;
-};
+// OrderRequest (the emitted order intent) is the shared type from common/types.h
+// so it can flow unchanged into the RiskEngine and OrderGateway. side==BUY when
+// the score crosses +threshold, side==SELL when it crosses -threshold.
 
 // Fixed-size circular array. push() overwrites the oldest entry once full;
 // operator[](0) is the oldest, operator[](count-1) the newest. No heap.
@@ -54,7 +75,6 @@ struct RingBuffer {
     int capacity = N;
 
     void setCapacity(int cap) {
-        // assert lives in the header so template stays inline; see <cassert>
         capacity = cap;
     }
 
@@ -78,7 +98,9 @@ class StrategyEngine {
 public:
     explicit StrategyEngine(EngineConfig cfg);
 
-
+    // Push the update into the ring buffers, recompute signals, and return an
+    // OrderRequest iff |score| > threshold AND cooldown has expired. Returns
+    // nullopt while warming up (buffers not yet full) or on no-trade.
     std::optional<OrderRequest> onBookUpdate(const BookUpdate& u);
 
     double computeMomentum()  const;  // mid[now] - mid[now-N]
@@ -97,6 +119,7 @@ private:
     double     vwapNum_       = 0.0;  // running Sum(mid * vol) over the window
     double     vwapDen_       = 0.0;  // running Sum(vol) over the window
     int64_t    lastOrderTsNs_ = 0;
+    uint64_t   nextClientOrderId_ = 1;  // stamped onto each emitted OrderRequest
 };
 
 }  // namespace hft
