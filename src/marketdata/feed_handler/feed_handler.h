@@ -1,8 +1,5 @@
 #pragma once
 
-// ==========================================================================
-// Market Data Feed Handler / Parser  (simplified CBOE PITCH 2.x variant)
-// ==========================================================================
 // Concepts: zero-copy parsing, PITCH protocol, jump-table dispatch, gap detection
 //
 // A market data feed handler receives a raw byte stream from an exchange over
