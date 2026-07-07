@@ -1,0 +1,245 @@
+================================================================================
+ ADVANCED HFT ENGINE  -  HOW TO MAKE THIS A TIER-1 / ELITE PROJECT
+ Companion to PROJECT_PLAN.txt   (read that first; this is the "go deeper" layer)
+ Author/Owner: Rahat
+ Purpose: turn a correct-but-basic engine into one that impresses Jane Street,
+          Citadel Securities, HRT, Jump, Optiver, IMC -- by going DEEP, not WIDE.
+================================================================================
+
+
+--------------------------------------------------------------------------------
+0. THE ONE IDEA THAT MATTERS
+--------------------------------------------------------------------------------
+Elite firms assume you can write code. What they screen for is DEPTH, RIGOR,
+ADVERSARIAL CORRECTNESS, and MEASUREMENT HONESTY. So you do NOT make this
+"advanced" by adding more components. You make it advanced by:
+
+  - Going absurdly deep on a few things (order book, hot path, measurement).
+  - Being able to defend EVERY design decision under five "why?"s in a row.
+  - Producing reproducible NUMBERS (latency tails) and explaining how you got them.
+
+Golden rule (unchanged): make it work -> make it right -> make it fast, with
+measurements at every step. A slow correct version you understand beats a fast
+one you can't explain.
+
+Mental model of "tiers":
+  Tier 4  Scaffold: order book + matching, no build/CI/numbers.        <- avoid
+  Tier 3  Solid: full core loop, CMake, tests, CI green, README.
+  Tier 2  Standout: lock-free hot path + custom allocators + MEASURED
+          tick-to-trade latency histogram (p50/p99/p99.9) w/ before/after.
+  Tier 1  Elite: + deterministic replay, property/fuzz tests under sanitizers,
+          a written DESIGN.md of trade-offs, and an honest CUDA/ML extension.
+
+
+--------------------------------------------------------------------------------
+1. FIX THE CREDIBILITY-KILLERS FIRST  (do these before you publish ANY numbers)
+--------------------------------------------------------------------------------
+A sharp interviewer spots these in seconds; left in, they undermine everything.
+
+  [ ] FIXED-POINT PRICE. Replace `double price` everywhere with an integer
+      tick type (e.g. int64_t ticks, or a Price class wrapping int64_t with a
+      known tick size). Floats for money is an instant red flag in quant land
+      (rounding, non-associativity, == comparisons). Add a Price unit test:
+      arithmetic, ordering, tick conversion, no precision loss.
+
+  [x] O(1) MEMORY POOL release(). (Already done: intrusive free list, recover
+      the slot from the pointer instead of scanning. Next: make the free list
+      atomic when it goes on a lock-free path -- and be ready to discuss ABA.)
+
+  [ ] REPO HYGIENE. Remove empty/placeholder junk (empty python.py, committed
+      PDFs, stray binaries). Add a real README + .gitignore for build artifacts.
+      A repo that looks abandoned dies in the recruiter's 60-second glance.
+
+  [ ] FIXED-WIDTH WIRE TYPES. In any protocol, use int64_t/uint64_t, never
+      `long` (4 bytes on Windows/LLP64, 8 on Linux/LP64). Document endianness.
+
+
+--------------------------------------------------------------------------------
+2. MEASUREMENT RIGOR  (this is the #1 differentiator -- master it)
+--------------------------------------------------------------------------------
+Anyone can print a number; they will immediately ask HOW you measured it. Build
+the harness so your answer is airtight.
+
+2A. WHAT to measure
+  - Tick-to-trade latency: time from "market data byte arrives" to "order bytes
+    leave". This is THE number. Report a HISTOGRAM: p50 / p99 / p99.9 / p99.99.
+    NEVER lead with the average -- tails are everything in HFT; averages are a
+    junior tell.
+  - Per-component microbenchmarks: order book add / cancel / match, ring buffer
+    enqueue/dequeue, parser throughput (msgs/sec).
+
+2B. HOW to measure (and what to say)
+  - Use rdtsc / rdtscp for sub-ns granularity on the hot path; calibrate TSC to
+    nanoseconds once at startup. Know WHY: std::chrono::high_resolution_clock
+    has call overhead and can hit the kernel. Know about TSC invariance
+    (constant_tsc / nonstop_tsc) and serialization (rdtscp vs rdtsc + lfence).
+  - COORDINATED OMISSION: mention this UNPROMPTED. Naive loops under-report
+    tail latency because they stop sending while the system is stalled. Fix by
+    measuring against an intended send schedule (HdrHistogram-style correction).
+  - Pin to an ISOLATED core (isolcpus / taskset / sched_setaffinity), disable
+    turbo/frequency scaling for stable runs, warm up caches, and subtract the
+    measurement overhead (time an empty rdtsc pair).
+  - Use HdrHistogram (or roll your own log-bucketed histogram) so p99.9 is
+    accurate and cheap to record on the hot path.
+
+2C. DELIVERABLE
+  docs/PERFORMANCE.md with: a latency table, the histogram plot, the EXACT
+  methodology (CPU, pinning, compiler flags, how CO was handled), and at least
+  one BEFORE/AFTER optimization ("p99 tick-to-trade: 4.2us -> 1.1us after
+  flat-array book + cache-line padding"). Reproducible > impressive-looking.
+
+
+--------------------------------------------------------------------------------
+3. THE HOT PATH  (low-level mastery they actually screen for)
+--------------------------------------------------------------------------------
+3A. LOCK-FREE QUEUES
+  - Implement an SPSC ring buffer YOURSELF (single-producer/single-consumer).
+    Be able to explain EVERY std::memory_order: why acquire on the read of the
+    head, release on the write of the tail, why not seq_cst (fences cost), and
+    where ABA would bite an MPSC/lock-free stack.
+  - Pad head and tail to separate cache lines (alignas(64)) to kill FALSE
+    SHARING. Show a before/after benchmark proving the padding mattered.
+  - Later: MPSC queue for fan-in; discuss the harder correctness story.
+
+3B. MECHANICAL SYMPATHY (the vocabulary that signals seniority)
+  - No malloc, no exceptions, no virtual calls on the hot path. Resolve
+    strategy polymorphism at compile time (templates/CRTP) or via a flat
+    function table, not vtables.
+  - Cache: know the cost of an L1 hit vs LLC miss vs main memory (~ns scale).
+    Lay data out for sequential access; prefetch where it measurably helps.
+  - Branches: use likely/unlikely hints; reduce branch mispredicts in the
+    matching loop; consider branchless tricks ONLY where measured to win.
+  - Keep the Order struct cache-line friendly (you already alignas(64) it --
+    be ready to justify it: avoids straddling lines / false sharing).
+
+3C. ORDER BOOK, ADVANCED
+  - Start (done): std::map<price, level> -- clear, O(log n).
+  - Upgrade: FLAT ARRAY of price levels indexed by ticks -> O(1) best/add/cancel
+    with cache-friendly contiguous memory. Benchmark vs the map version and put
+    the delta in PERFORMANCE.md. This is a classic, legit "I made it fast with
+    evidence" story.
+  - Intrusive linked lists for the FIFO at each level (no per-node allocation;
+    use the memory pool). O(1) cancel via id -> node* index (you already do this).
+
+
+--------------------------------------------------------------------------------
+4. CORRECTNESS THAT READS AS SENIOR
+--------------------------------------------------------------------------------
+Elite firms are paranoid about correctness because bugs cost millions. Show it.
+
+  [ ] DETERMINISTIC REPLAY: same input stream -> byte-identical output, every
+      run. This is the backbone of both testing and debugging in real systems.
+  [ ] PROPERTY / FUZZ TESTING on the order book: generate random valid op
+      streams, then assert INVARIANTS after every op:
+        - book never crosses (best_bid < best_ask when both exist),
+        - total resting qty is conserved across add/cancel/match,
+        - no orphaned orders, no orders in the index but not in a level,
+        - price-time priority preserved.
+      Property tests catch the cases your example tests never imagined.
+  [ ] SANITIZERS IN CI: build/test under ASan, UBSan, and (for the lock-free
+      path) TSan. "Clean under TSan" is a real, respected signal.
+  [ ] GOLDEN-FILE MATCHING TESTS: known order sequence -> known fills, checked
+      in, diffed in CI.
+
+
+--------------------------------------------------------------------------------
+5. ENGINEERING MATURITY  (the cheap wins that flip the 60-second glance)
+--------------------------------------------------------------------------------
+  [ ] CMake build, one command to build everything.
+  [ ] GoogleTest for unit tests; Google Benchmark for microbenchmarks.
+  [ ] GitHub Actions CI: build + test + sanitizers on every push. Green badge.
+  [ ] clang-format + clang-tidy; consistent style; small, well-described commits.
+  [ ] README that OPENS with: a one-line pitch, the top 3 latency/throughput
+      NUMBERS, an architecture diagram, and a one-command run + a GIF/screenshot
+      of it trading. Recruiters spend ~60s -- the README must sell instantly.
+  [ ] docs/DESIGN.md: the trade-off discussion (why map then flat array; why
+      GPUs are NOT on the hot path; how you avoid look-ahead bias; lock-free
+      memory-order choices). Showing you know WHY is what survives interviews.
+
+
+--------------------------------------------------------------------------------
+6. NETWORKING & SYSTEMS  (the "real HFT" flavor -- optional but high-signal)
+--------------------------------------------------------------------------------
+  - Start with plain UDP multicast for market data + TCP for orders.
+  - BUSY-POLL the socket instead of blocking; pin the poll thread to a core.
+  - Learn (and write up) kernel-bypass concepts even if you only partly do them:
+    io_uring (modern async I/O), and the IDEAS behind DPDK / Solarflare
+    OpenOnload / kernel-bypass NICs. Discussing WHY the kernel network stack is
+    too slow for HFT is itself a strong signal.
+  - NUMA awareness: keep threads, memory, and NIC on the same NUMA node;
+    explain why crossing nodes adds latency.
+  - Feed handler hardening: sequence-gap detection + retransmit, A/B feed
+    arbitration (two redundant feeds, take whichever packet arrives first),
+    snapshot+incremental recovery. (Your feed_handler.h already scaffolds gap
+    detection + retransmit -- build the rest on top.)
+
+
+--------------------------------------------------------------------------------
+7. STRATEGY / RISK / P&L  (prove you understand the DOMAIN, not just the pipes)
+--------------------------------------------------------------------------------
+  - Market-making strategy with INVENTORY management: quote both sides around a
+    fair value, skew quotes by inventory, manage adverse selection. This shows
+    you understand the actual TRADE (great for Optiver/IMC flavor).
+  - Mean-reversion and a signal/momentum strategy for contrast.
+  - Pre-trade RISK on every order: max position, max order size, price collars,
+    a kill switch. Risk runs BEFORE the gateway, always.
+  - BACKTESTER with honest metrics: P&L, Sharpe, max drawdown, fill ratio, and
+    a discussion of look-ahead bias and transaction costs. Honesty about
+    limitations reads as senior; suspiciously perfect equity curves read as fake.
+
+
+--------------------------------------------------------------------------------
+8. THE EXTENSION: CUDA + ML  (the "wow" layer -- only after the core is solid)
+--------------------------------------------------------------------------------
+Position it CORRECTLY (this maturity itself impresses): GPUs are NOT on the
+ultra-low-latency hot path (CPU<->GPU transfer costs microseconds; GPUs hate
+branchy single-event logic). GPUs ARE for parallel BACKTESTING, model TRAINING,
+and batch feature/research compute.
+
+  - CUDA: parameter-sweep backtester -- run thousands of strategy configs in
+    parallel over historical data. Deliverable: a CPU-vs-GPU table
+    ("swept 10,000 configs in N s on GPU vs M min on CPU"). Skills: kernels,
+    memory coalescing, host/device transfer, Thrust.
+  - ML: engineer order-book features (imbalance, micro-price, spread, trade
+    flow, rolling vol) -> train a short-horizon price-direction model (start
+    logistic/XGBoost, then a small MLP/LSTM; Python/PyTorch is fine here) ->
+    export to ONNX/TorchScript -> run INFERENCE in C++ from a strategy via ONNX
+    Runtime/LibTorch -> backtest it against the baseline strategies through the
+    SAME risk checks. Report accuracy, P&L, Sharpe, drawdown, AND a candid
+    overfitting / look-ahead-bias discussion.
+
+
+--------------------------------------------------------------------------------
+9. WHAT NOT TO DO  (these actively hurt you at elite shops)
+--------------------------------------------------------------------------------
+  - Don't pad with shallow features. A 3-component system you understand at the
+    assembly level beats a 12-component one you can only describe. Depth > breadth.
+  - Don't fake or cherry-pick numbers. They WILL ask you to reproduce them live.
+    "p99 regressed when I added X, here's why" beats a too-clean graph.
+  - Don't over-claim "HFT". Never say "I put the order book on a GPU" or "this is
+    production HFT". Say: "a laptop-scale simulation of the architecture; here's
+    what real systems do differently." Calibrated honesty reads as MORE senior.
+  - Don't ignore the tails. Averages hide everything that matters.
+
+
+--------------------------------------------------------------------------------
+10. SUGGESTED ORDER OF ATTACK  (highest resume-ROI first)
+--------------------------------------------------------------------------------
+  1. Fix credibility-killers (Section 1): fixed-point Price, repo hygiene.
+  2. Engineering maturity (Section 5): CMake + GoogleTest + CI green + README.
+  3. Measurement harness (Section 2): histogram + first microbenchmarks +
+     one BEFORE/AFTER number. THIS is what makes the resume bullet.
+  4. Lock-free SPSC ring buffer + cache-line padding (Section 3A/3B), measured.
+  5. Flat-array order book upgrade (Section 3C), benchmarked vs the map.
+  6. Property/fuzz tests + sanitizers in CI (Section 4).
+  7. Close the loop: sim + feed handler + 1 strategy + risk + gateway (Sec 6/7).
+  8. DESIGN.md + PERFORMANCE.md (Section 5) -- write down the WHY.
+  9. Extension: ML signal, then CUDA sweep (Section 8).
+
+REALITY CHECK: for elite HFT the project is your DEPTH signal -- it gets you in
+the room and gives you 30 minutes of substance to defend. The GATE is still raw
+fundamentals (data structures/algorithms, probability & mental math, CS/systems).
+Build the project deep enough to defend cold, but do NOT let it crowd out
+interview prep. Both are required. The project opens the door; fundamentals
+close the deal.
+================================================================================
