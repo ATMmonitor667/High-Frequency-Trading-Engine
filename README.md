@@ -66,6 +66,7 @@ flowchart TB
 
   subgraph exec["src/execution"]
     OM["order_manager\n(order lifecycle)"]
+    TV["twap_vwap\n(parent-order slicers)"]
     FG["order_gateway\n(TODO / partial)"]
     FP["fills_processor\n(consume fills → update state)"]
   end
@@ -75,7 +76,7 @@ flowchart TB
   end
 
   FH --> PD --> OBB
-  OBB --> BA --> SE --> RE --> OM --> FG
+  OBB --> BA --> SE --> TV --> RE --> OM --> FG
   FG --> FP
   T --- MP
 
@@ -83,7 +84,7 @@ flowchart TB
   classDef todo fill:#2b1d0e,stroke:#f59e0b,stroke-width:1px,color:#fff7ed;
   classDef mid fill:#111827,stroke:#93c5fd,stroke-width:1px,color:#e5e7eb;
 
-  class T,MP,FH,PD,OBB,LOB,BA,SE,RE,OM,FP done;
+  class T,MP,FH,PD,OBB,LOB,BA,SE,RE,OM,FP,TV done;
   class ME,FG,N todo;
 ```
 

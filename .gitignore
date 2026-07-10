@@ -1,6 +1,27 @@
-Quant Math/
-
 # Local notes / planning docs (not part of the buildable project)
+Quant Math/
 *.py
-*.txt
 
+# Build artifacts
+*.exe
+*.obj
+*.o
+*.out
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.dll
+*.a
+*.so
+*.dylib
+
+# IDE / editor
+.vs/
+*.user
+*.suo
+
+# CMake / build trees
+build/
+cmake-build-*/
+.dist/
