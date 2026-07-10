@@ -52,7 +52,7 @@ flowchart TB
 
   subgraph core["src/core"]
     LOB["orderbook/limit_order_book\n(map levels + FIFO queues)"]
-    ME["matching_engine/\n(TODO)"]
+    ME["matching_engine\n(exchange LOB; submitOrder/onTrade stubs)"]
   end
 
   subgraph strategy["src/strategy"]
@@ -84,8 +84,8 @@ flowchart TB
   classDef todo fill:#2b1d0e,stroke:#f59e0b,stroke-width:1px,color:#fff7ed;
   classDef mid fill:#111827,stroke:#93c5fd,stroke-width:1px,color:#e5e7eb;
 
-  class T,MP,FH,PD,OBB,LOB,BA,SE,RE,OM,FP,TV done;
-  class ME,FG,N todo;
+  class T,MP,FH,PD,OBB,LOB,BA,SE,RE,OM,FP,TV,ME done;
+  class FG,N todo;
 ```
 
 ---
