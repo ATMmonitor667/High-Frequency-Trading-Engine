@@ -1,0 +1,105 @@
+================================================================================
+ HIGH-FREQUENCY-TRADING-ENGINE — TODO
+================================================================================
+
+RULE OF THUMB
+-------------
+  YOU implement:  new trading components + advanced upgrades (logic).
+  ASSISTANT:      wire completed components together (no new trading logic).
+
+  When a component is done + tested, hand it over for integration.
+
+Legend:  [ ] not started   [~] in progress   [x] done
+
+
+================================================================================
+PART A — NEW COMPONENTS FOR YOU TO IMPLEMENT
+================================================================================
+
+FOUNDATIONS
+-----------
+[ ] Fixed-point Price type (int64 raw, 1/10000 dollar)
+      Replace double px in types.h, BookUpdate, matching engine, gateway.
+      Do this early — it touches everything.
+
+[ ] Lock-free SPSC / MPSC ring buffers (hot-path thread handoff)
+
+[ ] Hugepage / per-thread memory pool (upgrade memory_pool.h)
+
+
+ADVANCED UPGRADES (v2 of already-integrated components)
+-------------------------------------------------------
+[ ] 01  L3 LOB: iceberg, amend-priority, self-trade prevention (STP)
+[ ] 04  Alpha Engine v2: signal blending, regime detection, signal decay
+[ ] 07  FIX Session v2: gap fill, sequence reset, persistent resend
+[ ] 08  Matching Engine v2: auctions (open/close uncross), pro-rata
+[ ] 10  PnL v2: multi-currency, short lots, FX conversion
+[ ] 11  Execution v2: POV and IS (adaptive urgency)
+
+
+RESEARCH / DATA
+---------------
+[ ] Feature engine (micro-price, imbalance z-scores, rolling vol)
+[ ] Backtester (queue-position fills, latency injection, TCA)
+[ ] Tick journal (mmap append + replay; upgrade tick_store)
+[ ] ML signal (train offline, ONNX inference in C++)
+
+
+NETWORKING / OPS  (src/network/ is empty)
+-----------------------------------------
+[ ] UDP multicast market-data transport
+[ ] TCP order-entry transport for FIX gateway
+[ ] Async low-latency logger (hot path enqueues only)
+
+
+================================================================================
+PART B — WIRING ONLY (assistant; uses YOUR completed components)
+================================================================================
+
+[ ] FeedHandler -> OrderBookBuilder callback binding
+      (FeedHandler uses bare function pointer; needs context/trampoline)
+
+[ ] trading_engine <-> exchange_sim full loop
+      sim seeds book + publishes MD; trading_engine sends orders to sim;
+      fills flow back through OMS -> FillsProcessor / PositionTracker
+
+[ ] Wire MarketMaker into trading_engine (optional strategy mode)
+      uses market_maker_adapter.h -> OMS + PositionTracker
+
+[ ] Wire TWAP/VWAP algos into trading_engine execution path
+      uses twap_vwap/oms_adapter.h
+
+[ ] Wire FIX GatewaySession into trading_engine (network mode)
+      uses fix_adapter.h -> OMS; replace in-process MatchingEngine route
+
+[ ] Wire tick_store replay -> FeedHandler -> full pipeline (backtest path)
+
+[ ] GitHub Actions CI (build + ctest on push) — infra, not a component
+
+
+================================================================================
+PART C — ALREADY DONE (integrated + building)
+================================================================================
+
+COMPONENTS (your logic, integrated)
+------------------------------------
+[x] LimitOrderBook
+[x] FeedHandler + PitchDecoder + OrderBookBuilder
+[x] StrategyEngine + book_adapter
+[x] RiskEngine
+[x] OrderManager + FillsProcessor + PositionTracker
+[x] MatchingEngine (LIMIT/MARKET/IOC/FOK/STOP)
+[x] FIX GatewaySession (order_gateway)
+[x] TWAP / VWAP (twap_vwap)
+[x] MarketMaker
+[x] TickStore
+
+WIRING / INFRA (assistant)
+--------------------------
+[x] CMake + ctest (15/15 tests pass)
+[x] apps/trading_engine (composition root; partial loop)
+[x] apps/exchange_sim (matching engine venue demo)
+[x] benchmarks/latency_bench (measures existing hot path)
+[x] Adapters: matching_adapter, fix_adapter, oms_adapter, market_maker_adapter
+
+================================================================================

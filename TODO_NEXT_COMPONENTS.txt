@@ -1,0 +1,64 @@
+================================================================================
+ TODO — NEW COMPONENTS TO IMPLEMENT  (owner: Rahat)
+================================================================================
+These are NEW components / trading logic. The AI assistant will NOT write these
+— it only WIRES completed components together. Implement each, then hand it over
+for integration (same flow as matching engine / FIX gateway / market maker).
+
+Legend: [ ] not started   [~] in progress   [x] done (ready to integrate)
+
+--------------------------------------------------------------------------------
+FOUNDATIONS
+--------------------------------------------------------------------------------
+[ ] Fixed-point Price type (int64 raw units, e.g. 1/10000 dollar)
+      - replace double px across types.h / BookUpdate / matching engine / gateway
+      - from_double/to_double, round_to_tick, ticks_between, notional (int128)
+      - WHY: float compares are unreliable; exchanges speak integers; faster
+      - NOTE: cross-cutting — touches every component, do early
+
+[ ] Lock-free SPSC / MPSC ring buffers (single-producer/consumer queues)
+      - power-of-two ring, acquire/release, cache-line aligned heads/tails
+      - WHY: hand work between threads with no mutex on the hot path
+
+[ ] Hugepage / per-thread memory pool (upgrade of common/memory_pool.h)
+
+--------------------------------------------------------------------------------
+ADVANCED COMPONENT UPGRADES (v2 of things already integrated)
+--------------------------------------------------------------------------------
+[ ] 01  L3 Limit Order Book: iceberg orders, amend-priority rules, self-trade
+        prevention (STP)
+[ ] 04  Multi-Signal Alpha Engine: signal blending, regime detection (switch
+        weights by market state), signal decay
+[ ] 07  FIX Session: real recovery + gap fill (replay from store, sequence
+        reset, persistent resend)  — upgrade of order_gateway
+[ ] 08  Matching Engine: opening/closing auctions (uncross) + pro-rata
+        allocation  — upgrade of matching_engine
+[ ] 10  Multi-Currency Lot-Accounting PnL: short lots, FX conversion, per-ccy
+        accounting  — upgrade of position_tracker
+[ ] 11  Adaptive Execution: POV (percent-of-volume) and IS (implementation
+        shortfall, urgency-adaptive)  — upgrade of twap_vwap
+
+--------------------------------------------------------------------------------
+RESEARCH / DATA PIPELINE
+--------------------------------------------------------------------------------
+[ ] Feature engine: incremental microstructure features (micro-price, imbalance,
+        rolling vol, z-scores) feeding the alpha engine / ML
+[ ] Backtester: queue-position fill model, latency injection, TCA report
+[ ] Tick journal: mmap append-only journal + replay (upgrade of tick_store)
+[ ] ML signal: train offline, export ONNX, run inference in C++ as an ISignal
+
+--------------------------------------------------------------------------------
+NETWORKING / OPS (src/network is currently empty)
+--------------------------------------------------------------------------------
+[ ] UDP multicast market-data transport (A/B feed arbitration, gap recovery)
+[ ] TCP order-entry transport for the FIX gateway
+[ ] Async low-latency logger (hot path enqueues; background thread writes)
+
+--------------------------------------------------------------------------------
+DONE THIS ITERATION (wiring/infra — handled by the assistant, NOT components)
+--------------------------------------------------------------------------------
+[x] CMake build system (one-command build + ctest; 15/15 tests pass)
+[x] apps/exchange_sim (drives the matching engine; closes the loop)
+[x] src/common/latency.h + latency benchmark (tick-to-trade histogram)
+[ ] GitHub Actions CI (build + ctest on push)
+================================================================================

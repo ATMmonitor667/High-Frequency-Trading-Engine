@@ -55,10 +55,13 @@ struct TradeMsg {
 //packed tells the compiler there isn't any extra padding between fields. Usually the compiler
 //adds gaps so types align on 8-byte boundaries etc, but on the wire the bytes are back-to-back
 //with no gaps — packed makes our struct match that exact layout so we don't read wrong offsets.
+// Portable exact-layout packing: #pragma pack works on MSVC, GCC and Clang
+// (the earlier __attribute__((packed)) was GCC/Clang-only and broke MSVC).
+#pragma pack(push, 1)
 struct PacketHeader {
     uint64_t seqNum;
     uint16_t msgCount;
-} __attribute__((packed));
+};
 
 //Every message inside a packet starts with this little header before the body.
 //type = which kind of message (0x01 add, 0x02 cancel, 0x03 trade)
@@ -66,7 +69,8 @@ struct PacketHeader {
 struct MsgHeader {
     uint8_t type;
     uint8_t len;
-} __attribute__((packed));
+};
+#pragma pack(pop)
 
 /*
 These are the actual hex values for the message type byte on the wire.
