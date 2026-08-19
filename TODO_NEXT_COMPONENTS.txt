@@ -10,11 +10,24 @@ Legend: [ ] not started   [~] in progress   [x] done (ready to integrate)
 --------------------------------------------------------------------------------
 FOUNDATIONS
 --------------------------------------------------------------------------------
-[ ] Fixed-point Price type (int64 raw units, e.g. 1/10000 dollar)
-      - replace double px across types.h / BookUpdate / matching engine / gateway
-      - from_double/to_double, round_to_tick, ticks_between, notional (int128)
+[~] Fixed-point Price type (int64 raw units, e.g. 1/10000 dollar)
+      - [x] TYPE LANDED: src/common/fixed_point.h  (from AdvancedHFT/01)
+            Px/Qty/Notional, from_double/to_double, round_to_tick,
+            ticks_between, __int128 notional. 18 tests in
+            tests/unit/test_timing_fixed_point.cpp.
+      - [ ] MIGRATION PENDING: double px is still the type carried by
+            types.h / BookUpdate / matching engine / gateway. Swapping it is a
+            separate breaking change across ~30 sources + 15 tests.
       - WHY: float compares are unreliable; exchanges speak integers; faster
       - NOTE: cross-cutting — touches every component, do early
+
+[x] TSC nanosecond clock  (from AdvancedHFT/01)
+      - src/common/timing.h: TscClock (median-of-3 calibration, anchored
+        now_ns(), wall_ns(), CACHELINE / HFT_LIKELY / HFT_UNLIKELY).
+      - Replaced the weaker steady_clock-calibrated TscClock in latency.h;
+        latency.h now includes timing.h and keeps LatencyHistogram only.
+      - Wired: apps calibrate() at startup; OrderManager::submit stamps tsNs
+        when the caller passes 0 (was breaking the risk rate limiter/dedupe).
 
 [ ] Lock-free SPSC / MPSC ring buffers (single-producer/consumer queues)
       - power-of-two ring, acquire/release, cache-line aligned heads/tails

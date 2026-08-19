@@ -28,6 +28,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "../../common/timing.h"     // hft::TscClock
 #include "../../common/types.h"      // hft::Side
 #include "../../risk/risk_engine.h"  // hft::RiskEngine, hft::OrderRequest, hft::RiskResult
 
@@ -59,12 +60,15 @@ struct OrderRecord {
 // Order intent handed to the OMS by the strategy. Kept distinct from
 // hft::OrderRequest (the risk/gateway wire type) because the OMS assigns the
 // clientOrderId itself; the strategy does not supply one.
+// tsNs is the decision timestamp (TscClock::now_ns()). Leave it 0 and submit()
+// stamps it at the order-entry boundary -- see the note there for why a
+// permanently-zero tsNs breaks the risk engine's rate limiter and dedupe ring.
 struct OmsOrderRequest {
     std::string symbol;
     bool        buy;
     double      px;
     long        qty;
-    int64_t     tsNs;
+    int64_t     tsNs = 0;
 };
 
 using FillCallback   = std::function<void(const OrderRecord&, double fillPx, long fillQty)>;

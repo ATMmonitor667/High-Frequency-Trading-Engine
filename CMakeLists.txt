@@ -51,6 +51,7 @@ target_link_libraries(latency_bench PRIVATE hft)
 enable_testing()
 
 set(HFT_UNIT_TESTS
+  test_timing_fixed_point
   test_limit_order_book
   test_pitch_decoder
   test_feed_handler

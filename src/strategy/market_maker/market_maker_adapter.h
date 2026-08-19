@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <string>
 
+#include "../../common/timing.h"
 #include "../../execution/order_manager/order_manager.h"
 #include "../../portfolio/position_tracker.h"
 #include "market_maker.h"
@@ -32,7 +33,12 @@ public:
 
     uint64_t submitOrder(MMOrder o) override {
         if (!oms_) return 0;
-        return oms_->submit(OmsOrderRequest{o.symbol, o.buy, o.price, o.qty, /*tsNs=*/0});
+        // Stamp at the moment the quote decision leaves the strategy. The OMS
+        // would stamp a zero for us, but this is the timestamp that actually
+        // means something downstream -- it is what the risk engine's rate
+        // limiter and dedupe window measure elapsed time against.
+        return oms_->submit(
+            OmsOrderRequest{o.symbol, o.buy, o.price, o.qty, TscClock::now_ns()});
     }
     void cancelOrder(uint64_t id) override {
         if (oms_ && id != 0) oms_->cancel(id);

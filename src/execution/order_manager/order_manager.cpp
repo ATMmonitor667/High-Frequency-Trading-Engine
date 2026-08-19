@@ -23,13 +23,22 @@ uint64_t OrderManager::submit(const OmsOrderRequest& req)
     if (!risk_)
         return 0;
 
+    // Callers that do not supply a timestamp get stamped here, at the system's
+    // order-entry boundary. This is not cosmetic: RiskEngine's token-bucket
+    // rate limiter refills from (order.tsNs - lastRefillNs_) and its duplicate
+    // ring ages entries out by the same delta. A caller passing tsNs == 0
+    // leaves both frozen -- the bucket never refills, so once the first
+    // `ordersPerSec` orders are spent every later order is rejected with
+    // "RateLimit: exceeded", and no id ever ages out of the dedupe window.
+    const int64_t tsNs = (req.tsNs != 0) ? req.tsNs : TscClock::now_ns();
+
     const OrderRequest riskReq{
         clOrdId,
         req.symbol,
         req.buy ? Side::BUY : Side::SELL,
         req.px,
         req.qty,
-        req.tsNs
+        tsNs
     };
 
     const CheckResult riskResult = risk_->check(riskReq);
@@ -45,7 +54,7 @@ uint64_t OrderManager::submit(const OmsOrderRequest& req)
         req.qty,
         0,
         0.0,
-        req.tsNs,
+        tsNs,
         0
     };
 

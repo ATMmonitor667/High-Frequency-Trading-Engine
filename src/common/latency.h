@@ -1,12 +1,15 @@
 #pragma once
 
 // ==========================================================================
-// Low-latency timing + latency histogram
+// Latency histogram
 // ==========================================================================
-// TscClock reads the CPU Time Stamp Counter (rdtsc) for cheap (~single-digit ns)
-// high-resolution timestamps, calibrated against steady_clock to convert cycles
-// -> nanoseconds. LatencyHistogram collects samples and reports p50/p90/p99/
-// p99.9/max -- the percentile view HFT latency work is judged on (never means).
+// LatencyHistogram collects samples and reports p50/p90/p99/p99.9/max -- the
+// percentile view HFT latency work is judged on (never means).
+//
+// TscClock itself now lives in common/timing.h, which this header pulls in so
+// existing `#include "common/latency.h"` callers keep compiling unchanged. That
+// version is calibrated with a median-of-3 window and adds now_ns()/wall_ns();
+// the rdtsc()/toNs()/cyclesPerNs() spellings used here are unchanged.
 //
 // Usage:
 //   TscClock::calibrate();
@@ -17,57 +20,14 @@
 //   h.report();
 
 #include <algorithm>
-#include <chrono>
 #include <cstdint>
 #include <iostream>
 #include <string>
 #include <vector>
 
-#if defined(_MSC_VER)
-  #include <intrin.h>
-#elif defined(__x86_64__) || defined(__i386__)
-  #include <x86intrin.h>
-#endif
+#include "timing.h"
 
 namespace hft {
-
-inline uint64_t rdtsc_now() {
-#if defined(_MSC_VER) || defined(__x86_64__) || defined(__i386__)
-    return __rdtsc();
-#else
-    // Portable fallback: steady_clock nanoseconds as "cycles" (cyclesPerNs=1).
-    return static_cast<uint64_t>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::steady_clock::now().time_since_epoch()).count());
-#endif
-}
-
-class TscClock {
-public:
-    // Measure TSC frequency against steady_clock over a short busy interval.
-    static void calibrate(int ms = 50) {
-        using clock = std::chrono::steady_clock;
-        const uint64_t c0 = rdtsc_now();
-        const auto     t0 = clock::now();
-        const auto     dur = std::chrono::milliseconds(ms);
-        while (clock::now() - t0 < dur) { /* busy wait */ }
-        const uint64_t c1 = rdtsc_now();
-        const auto     t1 = clock::now();
-        const double ns = static_cast<double>(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count());
-        if (ns > 0.0)
-            cyclesPerNs_ = static_cast<double>(c1 - c0) / ns;
-        if (cyclesPerNs_ <= 0.0)
-            cyclesPerNs_ = 1.0;
-    }
-
-    static uint64_t rdtsc() { return rdtsc_now(); }
-    static double   toNs(uint64_t cycles) { return static_cast<double>(cycles) / cyclesPerNs_; }
-    static double   cyclesPerNs() { return cyclesPerNs_; }
-
-private:
-    static inline double cyclesPerNs_ = 1.0;
-};
 
 class LatencyHistogram {
 public:

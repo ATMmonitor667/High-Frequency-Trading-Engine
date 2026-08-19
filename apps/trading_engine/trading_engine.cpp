@@ -31,11 +31,16 @@
 #include <iostream>
 #include <memory>
 
+#include "../../src/common/timing.h"
 #include "trading_engine.h"
 
 using namespace hft;
 
 int main() {
+    // Once, before anything timestamps. Until this runs, now_ns() returns a raw
+    // cycle count rather than nanoseconds -- still monotonic, but wrong units.
+    TscClock::calibrate();
+
     TradingEngineConfig cfg;
     cfg.symbol     = "AAPL";
     cfg.strategyId = "momentum1";
@@ -71,7 +76,7 @@ int main() {
     // 3) Demonstrate the full fill path with a simulated exchange fill.
     //    (Real fills will arrive here once MatchingEngine::submitOrder is done.)
     const uint64_t demoId = engine->oms().submit(
-        OmsOrderRequest{cfg.symbol, true, 100.10, 100, 0});
+        OmsOrderRequest{cfg.symbol, true, 100.10, 100, TscClock::now_ns()});
     if (demoId != 0) {
         std::cout << "\n[demo] simulating exchange fill for clOrdId=" << demoId << "\n";
         engine->simulateFill(demoId, 100.10, 100, /*isFull=*/true);

@@ -8,6 +8,7 @@
 #include <iostream>
 #include <string>
 
+#include "../../src/common/timing.h"
 #include "exchange_sim.h"
 
 using namespace hft;
@@ -31,6 +32,8 @@ void printTop(const ExchangeSim& sim, int64_t ts, const char* label) {
 }  // namespace
 
 int main() {
+    TscClock::calibrate();   // once, before anything timestamps
+
     ExchangeSim sim("AAPL");
 
     std::cout << "=== Exchange simulator (MatchingEngine venue) ===\n\n";
