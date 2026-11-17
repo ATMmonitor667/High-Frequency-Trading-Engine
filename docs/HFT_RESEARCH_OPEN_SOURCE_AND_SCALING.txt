@@ -1,0 +1,952 @@
+================================================================================
+ HFT ENGINE -- RESEARCH REPORT
+ Open-source projects to contribute to, GustGrid rating, the bar to beat,
+ production-level scaling ideas, and a C++ mastery path
+ Prepared for: Rahat            Researched: 16 November 2026
+================================================================================
+
+This is research only. Nothing in the code was changed.
+
+It is a companion to the documents you already have and does not repeat them:
+  docs/RECRUITER_ROADMAP.md      milestones 0-6 and release gates
+  docs/SCALING_TODO.md           checklist A01 ... I06
+  docs/PRODUCTION_REFERENCES.md  six production systems to study
+  HFT_IMPROVEMENT_ISSUES.txt     the 4,400-line defect and upgrade backlog
+Where an idea below is already in your documents, its ID is given in
+brackets. Two-digit IDs such as [A03] are from docs/SCALING_TODO.md.
+One-digit IDs such as [B8] are from HFT_IMPROVEMENT_ISSUES.txt. Items marked
+NEW are not in any of your existing documents.
+
+CONTENTS
+  1. Summary
+  2. Where your project stands today
+  3. GustGrid: review and rating
+  4. The bar: what "GustGrid level or higher" means for an HFT project
+  5. Open-source projects to contribute to
+  6. Scaling to professional / production level: ideas, todos, concepts
+  7. C++ mastery path for a quant developer
+  8. The next 30 days
+  9. Sources, method and limits
+
+
+================================================================================
+ 1. SUMMARY
+================================================================================
+
+* GustGrid rates 68 / 100 on the scale defined in section 3. It scores high
+  on ambition, breadth and demo, and low on testing, numerical rigor and C++
+  structure. Your engine rates about 50 / 100 today on the same scale, mostly
+  because nothing in it is visible or proven yet, not because it is less work
+  (it is three times as much hand-written code).
+
+* You can pass GustGrid without adding any component. The fastest route is
+  to make what exists correct, measured and visible, then add real Nasdaq
+  data. Section 4 lists the six goals that would put the project at 85-90.
+
+* Best two projects to contribute to first: QuantLib (the best-known
+  open-source quant C++ library, very active, welcomes pull requests) and
+  quill (a low-latency C++ logger, small enough to read in full, and the
+  exact component your TODO calls "async low-latency logger"). BlazingMQ
+  from Bloomberg is the best third choice. The full list is in section 5.
+
+* The main risk to this project is not missing research. The last code
+  commit is dated 19 August 2026. Since then the repository has gained four
+  planning documents and no code. This report is the last plan you need for
+  a while; section 8 is a 30-day list of code to write.
+
+
+================================================================================
+ 2. WHERE YOUR PROJECT STANDS TODAY
+================================================================================
+
+Checked directly in Desktop\High-Frequency-Trading-Engine on 16 Nov 2026.
+(The folder "High Frequency Trading System" that was attached to this chat is
+empty. The code lives in "High-Frequency-Trading-Engine".)
+
+What exists
+  - 26 commits, 7 June to 19 August 2026. About 9,300 lines of C++17:
+    roughly 5,100 source, 3,600 tests, 600 apps and benchmark.
+  - Components: limit order book, matching engine (LIMIT, MARKET, IOC,
+    FOK, STOP-LIMIT), feed handler, simplified PITCH decoder, book builder,
+    strategy engine, market maker, risk engine, OMS, fills processor,
+    FIX 4.2 gateway session, TWAP/VWAP, position tracker, tick store.
+  - CMake + CTest with 16 test executables. TSC clock and fixed-point Px
+    type landed in the last commit.
+
+What is missing or unproven (each verified in the code, not assumed)
+  - README.md is 4 bytes. There is no CI workflow. The docs folder, the
+    improvement backlog and the resume bullets are all uncommitted.
+  - Prices are still double everywhere outside fixed_point.h, and
+    std::map<double, ...> is the price-level container in the matching
+    engine [A03].
+  - MatchingEngine::removeLink walks the price level from the head to find
+    the order, so cancel is O(depth), on a singly linked list [E02].
+  - Hot-path structs carry std::string (symbol, report type) and
+    submitOrder returns std::vector<MatchExecReport> by value [E03].
+  - Quantities are `long`. That is 32 bits on Windows/MSVC and 64 bits on
+    Linux, so the same struct has a different size and range on the two
+    platforms you intend to support [A04].
+  - OrderManager takes a std::mutex on every call and its outbound queues
+    are never drained [B03].
+  - The "tick-to-trade" benchmark starts its timer at the strategy call,
+    not at the incoming bytes, and the resting-add benchmark uses
+    `volatile auto reports` which distorts the result [C03].
+  - There is no real market data, no lock-free structure, no networking
+    (src/network is an empty folder), and no demo.
+
+Housekeeping, do this first: three copyrighted PDF books sit in the
+repository folder. Two are untracked. The third,
+a-practical-guide-to-quantitative-finance-interviews.pdf (44 MB), has been
+tracked in git since commit 557a589, so it is part of what gets pushed to
+GitHub. Remove it from the repository and from its history, and add *.pdf
+to .gitignore, before you share the repository link with anyone [H6].
+
+
+================================================================================
+ 3. GUSTGRID: REVIEW AND RATING
+================================================================================
+
+Repository: github.com/josephHelfenbein/GustGrid
+I cloned it and read the source. I did not build or run it (it needs an
+NVIDIA GPU), so the rating is based on the code, the README and the history.
+
+What it is
+  A real-time airflow and heat simulation of a PC case. A 64 x 256 x 128
+  voxel grid (2.1 million cells) is simulated on the GPU with CUDA and
+  drawn with OpenGL. The user toggles fans and the GPU and watches the
+  air speed, pressure and temperature fields change.
+
+Facts
+  - 71 commits by one author. Core work ran from 25 May to 23 June 2025,
+    about four weeks. 27 stars, 3 forks.
+  - About 2,950 lines of the author's own code: 1,292 lines of CUDA
+    (fluidSimulator.cu), 1,148 lines of renderer (renderer.cpp), 151
+    lines of scene setup, about 320 lines of GLSL in eight shaders.
+    main.cpp is five lines.
+  - Third-party: GLFW, GLM, FreeType, stb, glad, an OBJ loader.
+  - No tests, no CI workflow, no benchmark numbers.
+
+What is strong
+  - 13 CUDA kernels covering divergence, Jacobi pressure solve, gradient
+    subtraction, boundary enforcement, forward advection, convective and
+    conductive heat transfer, and fan forces.
+  - The Jacobi kernel loads each 8x8x8 block plus a one-cell halo into
+    shared memory (a 10x10x10 tile) before iterating. That is the correct
+    way to cut global-memory reads in a stencil and shows real GPU skill.
+  - Forward advection scatters with atomicAdd and then normalises, a
+    harder design than the usual backward semi-Lagrangian step.
+  - The simulation writes straight into OpenGL 3D textures through
+    CUDA-OpenGL interop, so no data returns to the CPU per frame.
+  - The residual reduction runs on the GPU. Constants live in CUDA constant
+    memory. Kernels use __restrict__ and fused multiply-add intrinsics.
+  - The renderer has PBR shading with normal, metallic and roughness maps,
+    a ray-marched volume shader, text rendering, and a hand-built UI with
+    checkboxes and sliders. A compute shader reads temperatures back.
+  - It builds on Linux and Windows, has a clear README with a video, and
+    it is finished. The commit history shows steady optimisation passes,
+    for example merging kernels, speeding up the ray marcher and moving
+    the residual sum from the CPU to a GPU kernel.
+
+What is weak
+  - Numerical rigor. The pressure solve runs a fixed maximum of 8 Jacobi
+    iterations and resets pressure to zero every step. One Jacobi sweep
+    moves information one cell, so on a grid this size the velocity field
+    is only roughly divergence-free. The velocity update is full of
+    hand-tuned clamps, damping factors and thresholds. The result looks
+    plausible but is not validated against any known flow.
+  - A real bug that a test would have caught: in velocityUpdateKernel the
+    Y-direction temperature gradient is assigned to gradX (line 1174), so
+    gradY is always zero and the X value is overwritten.
+  - Code structure. Scene state, GPU pointers and UI state are global
+    variables. renderer.cpp is one 1,148-line file. Shader sources are
+    loaded with raw malloc. The simulator is reached through singletons.
+  - cudaDeviceSynchronize is called after nearly every kernel launch (14
+    call sites), which is unnecessary on a single stream.
+  - No tests of any kind, no CI, no frame-time or throughput numbers.
+  - The README says MIT; the LICENSE file is Apache 2.0.
+
+Rating scale used here
+  100  production-grade open source written by specialists (QuantLib, Aeron)
+   85  would stand out among professional engineers' personal work
+   70  strong undergraduate portfolio project
+   50  typical finished course or side project
+
+Scores (each out of 10; the weight is its share of the overall score.
+Skill categories weigh more than process categories because you asked
+about skill level.)
+                                                 score   weight
+  Technical ambition and problem difficulty       8.0     15
+  Breadth of stack                                8.5     15
+  Core technical skill (GPU / parallel code)      7.0     20
+  Numerical and physical rigor                    4.5     10
+  C++ structure and craftsmanship                 4.5     10
+  Testing and verification                        1.0      5
+  Engineering practice (CI, benchmarks, docs)     4.0      5
+  Presentation and demo                           9.0     10
+  Completion (it ships and runs)                  9.0     10
+
+  OVERALL SKILL LEVEL:  68 / 100
+
+  Read as two numbers: about 85 for ambition, breadth, demo and
+  completion, and about 35 for rigor, structure, testing and process. As a
+  recruiting artifact it performs above its 68, because a 30-second video
+  of moving air and heat is understood by anyone, and it is finished.
+
+The lesson to take from it
+  Joseph shipped a complete, visual, explainable thing in four weeks and
+  then stopped. Your project has more code, more tests and a harder domain
+  model, and a stranger who opens your repository today sees an empty
+  README. The gap between the two projects is presentation and completion,
+  not difficulty.
+
+
+================================================================================
+ 4. THE BAR: "GUSTGRID LEVEL OR HIGHER" FOR AN HFT PROJECT
+================================================================================
+
+Your engine on the same scale and weights, today
+                                                 score   weight
+  Technical ambition and problem difficulty       7.0     15
+  Breadth of stack                                8.0     15
+  Core technical skill (low-latency code shown)   4.0     20
+  Domain modelling and correctness                5.5     10
+  C++ structure and craftsmanship                 5.5     10
+  Testing and verification                        5.0      5
+  Engineering practice (CI, benchmarks, docs)     2.5      5
+  Presentation and demo                           1.0     10
+  Completion (the loop closes and it ships)       4.0     10
+
+  OVERALL:  about 50 / 100
+
+  The two largest gaps are the 20-weight skill row (no lock-free code, no
+  measured optimisation, strings and maps on the hot path) and the demo
+  row. Both are fixable without new components.
+
+A low-latency project is judged differently from a graphics project. It has
+to prove three things: that it is correct, how fast it is and how you know,
+and what happens when something fails. A project that proves those on real
+data is rarer than a good demo.
+
+What the top of the personal-project range looks like right now
+  - ASherjil/abt-t2t (C++). ITCH 5.0 feed handler and OUCH order entry
+    over Solarflare ef_vi kernel bypass, with tick-to-trade measured by NIC
+    hardware timestamps over a full Nasdaq trading day. Its README reports
+    about 5.4 million samples with the worst at roughly 3.2 microseconds.
+    This is the strongest public personal HFT project I found. It needs
+    two specialist network cards, so treat it as the ceiling, not the plan.
+  - KareemJandali/itchbook (C++20). ITCH 5.0 book reconstruction, matching
+    engine and a queue-aware backtester.
+  - chronoxor/CppTrader (C++). Matching engine, order book and ITCH
+    handler. READMEs of its forks report a sample Nasdaq day of about
+    268-283 million ITCH messages parsed at roughly 100-117 ns per message.
+    Reproduce this on your own machine and use it as your baseline.
+  Read all three before you design the ITCH stage. They show what a
+  reviewer will compare you against.
+
+The six goals that put this project at 85-90
+  GOAL 1  Visible.  README with architecture diagram, build commands, a
+      status table and a 60-90 second demo video. Green CI badge.
+      [A01 A02 F05]
+  GOAL 2  Correct.  Fixed-point prices end to end. A simple reference
+      matcher and a million seeded random operations compared against the
+      fast one. Fuzzed decoders. Sanitizers in CI. [A03 A05 A06 C01 C02]
+  GOAL 3  Real data.  A Nasdaq TotalView-ITCH 5.0 decoder that rebuilds
+      every book for a full trading day, with messages per second,
+      nanoseconds per message and memory published next to the CppTrader
+      baseline. [D01 D02 D05]
+  GOAL 4  Measured.  p50 / p99 / p99.9 / max with a written methodology,
+      and one optimisation told as a case study: std::map<double> price
+      levels replaced by a tick-indexed array, and O(depth) cancel replaced
+      by an intrusive doubly linked list, with before and after numbers
+      and a flame graph. [C03 C04 E02 E04]
+  GOAL 5  Systems depth.  An SPSC ring buffer you wrote, tested under
+      ThreadSanitizer and benchmarked against rigtorp/SPSCQueue,
+      boost::lockfree::spsc_queue and max0x7ba/atomic_queue. Pinned
+      threads. One networking experiment with numbers. [E05 I04 I05]
+  GOAL 6  Demonstrable.  A live order-book depth heatmap driven by the
+      real ITCH replay, with a fault injected on screen and the engine
+      halting and recovering. This is your answer to GustGrid's video.
+      [F03 F04]
+
+  Stretch to 90+: the latency-sensitivity study [I01], or one merged pull
+  request in each of two projects from section 5.
+
+
+================================================================================
+ 5. OPEN-SOURCE PROJECTS TO CONTRIBUTE TO
+================================================================================
+
+Activity figures are from shallow git clones on 16 Nov 2026: last commit
+date on the default branch, and approximate commits / distinct authors since
+mid-May 2026 (merge commits included). They are maintenance signals only.
+
+--------------------------------------------------------------------------------
+TIER 1 -- START HERE (good fit, and a first pull request is realistic)
+--------------------------------------------------------------------------------
+
+1. QuantLib                     github.com/lballabio/QuantLib       C++
+   What: the standard open-source library for pricing and risk. About
+     400,000 lines of C++.
+   Activity: last commit 16 Nov 2026; ~1,300 commits, ~100 authors.
+   Why: the most widely known open-source C++ quant library. It covers
+     the pricing and math side that your systems project does not.
+     Its README says contributions are welcome, pull requests get automatic
+     build and test feedback, and a CLA bot handles the paperwork.
+   Where to start: issues labelled "help wanted"; missing unit tests;
+     clang-tidy modernisation; holiday calendar updates; documentation.
+   Limit: it is not low-latency code. It teaches large-codebase C++,
+     templates and numerical testing, not nanoseconds.
+
+2. quill                        github.com/odygrd/quill             C++17
+   What: asynchronous low-latency logger. The caller thread only enqueues;
+     a backend thread formats and writes. Its docs name trading systems as
+     a target use.
+   Activity: last commit 16 Nov 2026; ~130 commits, 15 authors. MIT.
+   Why: it is the "async low-latency logger" in your TODO [D9]. It is small
+     enough to read completely, and its internals (per-thread SPSC queues,
+     deferred formatting, TSC timestamps) are the same ideas you need.
+   Where to start: use it in your engine first. Then benchmarks on your
+     hardware, documentation gaps, platform or compiler fixes, a new sink.
+
+3. BlazingMQ                    github.com/bloomberg/blazingmq      C++
+   What: Bloomberg's distributed message queue, used in production there
+     for more than eight years before it was open-sourced in 2023.
+   Activity: last commit 13 Nov 2026; ~460 commits, 17 authors. Apache-2.0.
+   Why: real finance-industry C++ with storage, replication and failover,
+     which is what sections H and G of your checklist are about. Its
+     CONTRIBUTING file points newcomers to "good first issue" and "help
+     wanted" labels.
+   Rules: discuss the change in an issue first, sign off commits (DCO),
+     include tests, run clang-format.
+
+4. Lock-free queue libraries    C++
+     github.com/max0x7ba/atomic_queue   last commit 23 Oct 2026, ~100 commits
+     github.com/rigtorp/SPSCQueue       last commit 14 Nov 2026
+     github.com/boostorg/lockfree       last commit 25 Oct 2026
+   Why: read all three before writing your own SPSC queue, then benchmark
+     yours against them. atomic_queue ships a benchmark suite that compares
+     many queues; adding a queue, a platform or a result is a natural PR.
+   Limit: these are small, finished libraries. They accept few changes.
+     Most of the value is in reading and measuring.
+
+5. Measurement tools you will use anyway    C / C++
+     github.com/google/benchmark            last commit 12 Nov 2026
+     github.com/HdrHistogram/HdrHistogram_c last commit 20 Oct 2026
+   Why: you need both for [C03 C04]. Bugs, unclear docs and missing
+     examples that you hit while using them make good first contributions.
+
+--------------------------------------------------------------------------------
+TIER 2 -- TRADING-DOMAIN PROJECTS (closest in concept to your engine)
+--------------------------------------------------------------------------------
+
+6. CppTrader                    github.com/chronoxor/CppTrader      C++
+   Matching engine, order book processor, Nasdaq ITCH handler. The closest
+   open project to your repository.
+   Activity: last commit 6 Nov 2026 but only ~8 commits in six months, one
+     maintainer, and issues that have been open for years.
+   Use it as: your benchmark baseline and a reading reference. Send a pull
+     request only for a clear bug with a test; expect slow review.
+
+7. QuickFIX                     github.com/quickfix/quickfix        C++
+   The reference open-source FIX engine.
+   Activity: last commit 20 May 2026; ~6 commits in six months.
+   Use it as: the counterparty for testing your FIX gateway [G05]. Fixes
+     and tests are possible but review is slow. It has its own licence.
+
+8. ccapi                        github.com/crypto-chassis/ccapi     C++
+   Header-only library for market data and order execution across crypto
+   exchanges. Last commit 12 Nov 2026; ~28 commits, 3 authors.
+   Why: exchange APIs change constantly, so there is always an endpoint to
+     add or fix, and it gives you a free live feed to test against.
+
+9. databento-cpp                github.com/databento/databento-cpp  C++
+   Official C++ client for Databento market data and its DBN binary
+   format. Last commit 3 Nov 2026; ~70 commits, 7 authors. Apache-2.0.
+   Why: a small, clean, modern codebase about exactly your problem
+     (decoding normalised market data fast). Most commits come from the
+     company, so open an issue before investing in a large change.
+
+10. Simple Binary Encoding      github.com/aeron-io/simple-binary-encoding
+    Binary message codec with a C++ code generator, the encoding family
+    used by exchange feeds. Last commit 12 Nov 2026; ~107 commits, 20 authors.
+    Why: study it before designing your own wire formats [A04].
+
+11. Aeron                       github.com/aeron-io/aeron   Java / C / C++
+    Low-latency messaging with a C media driver and a C++ client.
+    Last commit 16 Nov 2026; ~620 commits, 37 authors.
+    Why: the messaging layer in the deployed systems described in your
+      PRODUCTION_REFERENCES.md. Hard to contribute to; strong signal if
+      you do.
+
+12. NautilusTrader              github.com/nautechsystems/nautilus_trader
+    Rust core with Python control plane. Extremely active: commits daily,
+    thousands of commits and ~100 authors in six months. Contributors sign
+    a CLA.
+    Why: the most complete open trading platform. Only worth contributing
+      to if you are willing to write Rust. Otherwise read its architecture.
+
+13. hftbacktest                 github.com/nkaz001/hftbacktest  Rust / Python
+    Backtester that models feed latency, order latency and queue position.
+    Last commit 23 Dec 2025, nothing since.
+    Use it as: the design reference for your backtester and latency model
+      [I2 I01]. Do not plan on merged pull requests.
+
+14. ArcticDB                    github.com/man-group/ArcticDB   C++ core
+    Time-series database from Man Group. Last commit 16 Nov 2026;
+    ~217 commits, 16 authors.
+    Why: relevant to your tick store. Check its licence terms first.
+
+--------------------------------------------------------------------------------
+TIER 3 -- DEEP SYSTEMS (stretch; the most C++ growth per merged line)
+--------------------------------------------------------------------------------
+
+15. Seastar        github.com/scylladb/seastar       C++
+    Thread-per-core, shared-nothing async framework with io_uring and
+    optional DPDK. ~330 commits, 42 authors in six months. A good open
+    example of thread-per-core design, the same idea as pinned
+    single-owner threads in a trading engine.
+
+16. Onload         github.com/Xilinx-CNS/onload      C
+    The open-source kernel-bypass stack for AMD Solarflare cards, including
+    ef_vi. Last commit 27 Oct 2026. Without the hardware, read the ef_vi
+    documentation and examples; do not expect to contribute.
+
+17. liburing       github.com/axboe/liburing         C
+    The io_uring library. Tests, examples and man pages take outside PRs.
+    Needed for [I05].
+
+18. LLVM libc++    github.com/llvm/llvm-project      C++
+    The standard library itself. The hardest option and the one that
+    teaches the most about the language. Look for "good first issue".
+
+19. Read, do not contribute: facebook/folly (ProducerConsumerQueue, F14
+    hash maps), bloomberg/bde (the allocator model), martinus/
+    unordered_dense (a fast flat hash map), wolfpld/tracy (profiler).
+
+Not recommended as contribution targets
+  enewhuis/liquibook            last commit Dec 2022
+  exchange-core/exchange-core   last commit on master May 2022
+  jpmorganchase/abides-jpmc-public   last commit Dec 2023
+  eclipse-iceoryx/iceoryx (C++ shared-memory IPC): ~13 commits in six
+    months; its README says the classic C++ version reaches end of life
+    after iceoryx2 1.0. iceoryx2 is written in Rust with C++ bindings.
+  These remain useful to read.
+
+--------------------------------------------------------------------------------
+HOW TO CONTRIBUTE SO THAT IT COUNTS
+--------------------------------------------------------------------------------
+  - Pick two projects, not ten. My recommendation: QuantLib plus quill.
+    Swap quill for BlazingMQ if you prefer distributed systems.
+  - Before anything else, clone it, build it and run its full test suite.
+    That alone takes a day on a large project and teaches you its layout.
+  - Make the first pull request small: a failing test for a real bug, a
+    documentation fix you needed yourself, a missing benchmark. Read
+    CONTRIBUTING and comment on the issue before you start work.
+  - Realistic pace: one merged pull request a month.
+  - Budget: about one fifth of your project time. A merged PR is strong
+    evidence because a stranger reviewed your C++, but it does not replace
+    finishing your own engine.
+  - On the resume: "Contributed <what> to <project> (merged PR #N)", with
+    the link. Never list a project you only opened an issue on.
+
+
+================================================================================
+ 6. SCALING TO PROFESSIONAL / PRODUCTION LEVEL
+    Ideas, todos and concepts. Nothing here is implemented.
+================================================================================
+
+"Production level" means five properties, in this order of importance:
+  1. Correct     every state change is defined, tested and reproducible
+  2. Observable  you can say what it is doing and how fast, with evidence
+  3. Recoverable it fails safely and comes back to a known state
+  4. Fast        predictable tail latency, not just a good median
+  5. Operable    someone else can build, run, configure and debug it
+
+--------------------------------------------------------------------------------
+6.1 ARCHITECTURE
+--------------------------------------------------------------------------------
+Concept: single-writer, deterministic core. One thread owns the book,
+strategy, risk and order state. Inputs arrive as a single ordered stream of
+events; outputs leave as events. No locks inside. The EDX exchange described
+in your PRODUCTION_REFERENCES.md works this way, because it makes replay,
+testing and recovery possible.
+
+  [ ] Define one sequenced input event type and make every component
+      consume it. The same binary must run live, in replay and in tests.
+      [J1 J5 E7]
+  [ ] Journal every input event before it is applied. Recovery is: load
+      the last snapshot, replay the journal. [H01 D06]
+  [ ] Thread layout: feed thread -> SPSC -> core thread -> SPSC -> gateway
+      thread, plus a low-priority thread for logging and metrics. Write the
+      layout down with core numbers before coding it. [B3 E05]
+  [ ] Delete the std::mutex from OrderManager by giving the OMS to the
+      core thread. A lock is only needed where two threads share state,
+      and after this change none do. [B4]
+  [ ] NEW  Publish top-of-book to other processes through a seqlock in
+      shared memory, so a dashboard or a second strategy can read it
+      without ever blocking the core.
+  [ ] NEW  Split the repository into libraries with one-way dependencies
+      (common -> marketdata -> book -> strategy/risk -> execution -> apps)
+      and make CMake enforce it. Today everything is one "hft" target.
+
+--------------------------------------------------------------------------------
+6.2 DATA STRUCTURES AND MEMORY
+--------------------------------------------------------------------------------
+  [ ] Finish fixed-point prices everywhere. Integer ticks as keys. [A03]
+  [ ] Replace `long` with int32_t / int64_t / uint32_t chosen on purpose,
+      and static_assert the size of every wire and storage struct. [A04]
+  [ ] Price levels: replace std::map<double> with a structure chosen from
+      measurement. Candidates: array indexed by tick offset from a moving
+      base; sorted flat vector with the best price at the back; small
+      B-tree. Benchmark each on real ITCH data, dense and sparse. [B8]
+  [ ] Orders within a level: intrusive doubly linked list so cancel is an
+      O(1) unlink given the order pointer. [E02]
+  [ ] Order-id lookup: open-addressing flat hash map with preallocated
+      capacity, or a direct array if ids are dense. Compare against
+      std::unordered_map and unordered_dense. [E02]
+  [ ] Symbols as small integer ids resolved once at startup. No
+      std::string in any event, order or report. Report type as an enum.
+      [B5 E03]
+  [ ] Execution reports written into a caller-provided fixed buffer or a
+      bounded sink, never a returned std::vector. [B6 E03]
+  [ ] Prefault and lock all pools at startup (mlockall on Linux), then try
+      huge pages and measure the difference. [I04]
+  [ ] Decide alignas(64) per struct from access pattern. It prevents false
+      sharing between threads but makes a list walk touch one cache line
+      per order. For single-threaded structures, packed is usually faster.
+      [E04]
+  [ ] NEW  Zero-allocation proof: replace global operator new in a test
+      build with a counter that aborts after warm-up, and run every hot
+      path workload under it. This turns "no allocation" from a claim
+      into a test.
+
+--------------------------------------------------------------------------------
+6.3 CONCURRENCY
+--------------------------------------------------------------------------------
+  [ ] Write your own bounded SPSC ring: power-of-two capacity, head and
+      tail on separate cache lines, cached copies of the opposite index,
+      acquire/release ordering you can justify line by line. [B1 E05]
+  [ ] Test it: wraparound, full, empty, shutdown, 100 million items under
+      ThreadSanitizer, producer and consumer pinned to different cores.
+  [ ] Benchmark it against three libraries (section 5, item 4) and publish
+      throughput and latency on the same machine.
+  [ ] MPSC queue only for fan-in to the logger. [B2]
+  [ ] Seqlock for "latest value" data such as top-of-book and risk limits.
+  [ ] NEW  Write a one-page memory-ordering note for each concurrent
+      structure: what each atomic protects, why each ordering is enough,
+      and what breaks if it is weakened. Interviewers ask for this.
+
+--------------------------------------------------------------------------------
+6.4 MARKET DATA AND NETWORKING
+--------------------------------------------------------------------------------
+  [ ] Nasdaq TotalView-ITCH 5.0 decoder. Decode in place from the buffer
+      with explicit big-endian reads. Handle every message type or count
+      what you skip. [D01]
+  [ ] Rebuild all books for a full day; verify against hand-checked
+      fixtures and against CppTrader's output. [D02 G6]
+  [ ] NEW  MoldUDP64 framing with sequence numbers, which is how ITCH is
+      carried on the wire. Detect gaps; request retransmission; mark the
+      book stale until continuity returns. [D3 F01]
+  [ ] A/B feed arbitration: two identical streams, take whichever packet
+      arrives first, drop the duplicate. [D2]
+  [ ] NEW  OUCH 5.0 order entry over SoupBinTCP as a second, binary
+      gateway beside FIX. OUCH is Nasdaq's binary order-entry protocol;
+      FIX is the slower, more general path.
+  [ ] NEW  pcap replay: record your simulator's traffic to a capture file
+      and replay it at real or accelerated speed. This gives a repeatable
+      network benchmark without an exchange.
+  [ ] Socket ladder, each step measured against the last on identical
+      traffic: blocking sockets -> epoll -> busy polling -> io_uring ->
+      AF_XDP. Report the mode actually achieved. [D5 D6 I05]
+  [ ] NEW  Software receive and transmit timestamps from the kernel
+      (SO_TIMESTAMPING) so latency is measured from packet arrival, not
+      from your first line of code. Hardware timestamps if a NIC allows.
+  [ ] Kernel bypass with Onload / ef_vi needs Solarflare hardware. Write a
+      design note on what would change; do not buy cards for this. [D7]
+
+--------------------------------------------------------------------------------
+6.5 PERFORMANCE ENGINEERING AND MEASUREMENT
+--------------------------------------------------------------------------------
+  [ ] Linux as the measurement platform. Windows stays for portability.
+      [H9]
+  [ ] Google Benchmark for component microbenchmarks; HdrHistogram for
+      per-event latency in the pipeline. [C8 C04]
+  [ ] Label every number with its start and end point. Only call something
+      tick-to-trade if the timer starts at the incoming bytes. [C6 C03]
+  [ ] Environment script: isolated cores (isolcpus, nohz_full), interrupt
+      affinity moved off them, frequency governor fixed, SMT sibling idle.
+      Record the settings in every result. [C5 D8]
+  [ ] Open-loop load generator so queueing delay is included. [C07]
+  [ ] NEW  Hardware counters next to every latency figure: cycles,
+      instructions, cache misses, branch misses, page faults, context
+      switches (perf stat). A latency change with no counter change is
+      probably noise.
+  [ ] NEW  Flame graphs before and after each optimisation, stored in the
+      repository beside the numbers.
+  [ ] NEW  Read the generated assembly of the three hottest functions on
+      Compiler Explorer and explain each in DESIGN notes. Check that what
+      you believe is inlined really is.
+  [ ] NEW  Build variants compared with numbers: -O2 vs -O3, with and
+      without -march=native, link-time optimisation, profile-guided
+      optimisation trained on an ITCH replay.
+  [ ] Latency budget per stage checked in CI, failing on regression beyond
+      a tolerance. [J9]
+  [ ] docs/PERFORMANCE.md holding hardware, compiler, flags, commands, raw
+      output and limits. [C9 C06]
+
+--------------------------------------------------------------------------------
+6.6 CORRECTNESS AT PRODUCTION LEVEL
+--------------------------------------------------------------------------------
+  [ ] Reference matcher (slow, obviously right) and differential testing
+      with saved seeds. [C01]
+  [ ] Invariants asserted after every operation in test builds. [A06]
+  [ ] libFuzzer targets for every decoder and for the FIX parser. [C02]
+  [ ] ASan + UBSan and TSan jobs in CI on Linux; MSVC build on Windows.
+      [A02 G4]
+  [ ] Byte-identical replay: same input, same output hash, on every
+      platform and compiler. [G2 J2]
+  [ ] Warnings as errors: -Wall -Wextra -Wpedantic -Wconversion
+      -Wshadow, plus clang-tidy and clang-format in CI. [H3]
+  [ ] Coverage report, used to find untested branches, not as a target.
+      [G8]
+  [ ] NEW  Deterministic simulation testing. Run feed, engine, gateway
+      and exchange simulator inside one process on a virtual clock with a
+      seeded scheduler that injects delay, loss, reordering, duplicates
+      and disconnects. Any failure reproduces from its seed. Database
+      teams such as FoundationDB and TigerBeetle are known for this
+      technique, and it is rare in student projects.
+  [ ] NEW  Rewrite or re-derive the unit tests yourself. Your commit
+      messages say the tests were AI-written. You must be able to explain
+      every assertion; the reference matcher and property tests are the
+      natural place to make the test suite your own.
+
+--------------------------------------------------------------------------------
+6.7 RISK, RELIABILITY AND OPERATIONS
+--------------------------------------------------------------------------------
+  [ ] Working-order exposure reserved in risk limits. [B01]
+  [ ] Full OMS state machine including cancel-pending and late or
+      duplicate reports. [B02]
+  [ ] Price collar, maximum order size, per-symbol and gross limits.
+      [F8 F9]
+  [ ] Kill switch and cancel-all that still work when the feed is stale.
+      [B05]
+  [ ] Reconciliation on reconnect before trading resumes. [J6 G07 H03]
+  [ ] Typed, validated, versioned configuration; effective config hash in
+      every log and result. [G01 H5]
+  [ ] Metrics endpoint: feed age, sequence gaps, queue depths, rejects,
+      latency percentiles. Bounded cardinality. [H04]
+  [ ] Graceful shutdown and a written runbook. [H05 H07]
+  [ ] NEW  Binary structured logging: the hot path writes a fixed-size
+      record (event id plus raw arguments) to a ring; a separate tool
+      formats it later. Compare its cost against quill.
+  [ ] NEW  Warm standby: a second engine process tails the same journal
+      and can take over. Only after deterministic replay works. [H09]
+
+--------------------------------------------------------------------------------
+6.8 BUILD, RELEASE AND REPOSITORY QUALITY
+--------------------------------------------------------------------------------
+  [ ] CMakePresets.json with debug, release, asan, tsan, and bench
+      presets. One command each to build, test, bench and run the demo.
+      [A02]
+  [ ] Dependencies pinned through vcpkg or Conan or FetchContent with
+      fixed versions.
+  [ ] GoogleTest or Catch2 instead of 16 hand-rolled test mains. [G5]
+  [ ] NEW  Dev container or Dockerfile so a reviewer can build and run the
+      demo in one step on any machine.
+  [ ] NEW  Tagged releases with a CHANGELOG. v0.1 = visible and correct;
+      v0.2 = real data; v0.3 = measured and optimised; v1.0 = demo.
+  [ ] NEW  Architecture decision records: one short file per significant
+      choice (why tick-indexed levels, why single-writer, why this queue),
+      each with the alternatives measured. These are what a senior
+      reviewer reads first.
+  [ ] LICENSE file, and attribution for ideas adapted from books. [H6]
+
+--------------------------------------------------------------------------------
+6.9 MODERN C++ UPGRADES THAT EARN THEIR PLACE
+--------------------------------------------------------------------------------
+Move to C++20 (C++23 where both GCC and MSVC support the feature) only for
+features that remove a real problem. [H4]
+  [ ] Strong types: Px, Qty, OrderId, SymbolId, SeqNo as distinct types so
+      a quantity cannot be passed where a price is expected.
+  [ ] std::span for every buffer boundary; std::string_view at the edges.
+  [ ] std::bit_cast or memcpy for wire decoding instead of pointer casts
+      that break aliasing rules; std::endian and std::byteswap for order.
+  [ ] Concepts for strategy, sink and handler interfaces, so the hot path
+      is statically dispatched and inlined instead of going through
+      virtual calls or std::function. [B7]
+  [ ] std::expected (or an error-code return) on the hot path; exceptions
+      only for startup and configuration failures.
+  [ ] constexpr / consteval for lookup tables, message-length tables and
+      protocol checks, with static_assert on layouts.
+  [ ] [[likely]] / [[unlikely]] only where a profile shows a benefit.
+  [ ] Rule of zero by default; deleted copy on anything that owns a pool.
+  [ ] NEW  A compile-time message schema: describe each wire message once
+      and generate decoder, encoder, size check and fuzz corpus from it
+      with templates. This is a strong template-metaprogramming exercise
+      with a practical result.
+
+--------------------------------------------------------------------------------
+6.10 THE DEMO LAYER (WHAT GUSTGRID HAS AND YOU DO NOT)
+--------------------------------------------------------------------------------
+  [ ] Live depth heatmap: price on the vertical axis, time on the
+      horizontal, colour for resting size, trades as dots, your own quotes
+      as lines. Fed by the real ITCH replay through the seqlock or a
+      bounded snapshot queue. [F04 H8]
+  [ ] Side panels: stage latency histogram, inventory and P&L, risk
+      rejects, feed state (LIVE / STALE / RECOVERING).
+  [ ] One button that drops packets. The viewer watches the engine go
+      stale, pull its quotes, recover and resume. [F03]
+  [ ] Two ways to build it: a native window with Dear ImGui and ImPlot
+      (stays in C++), or a browser page fed over WebSocket. Either way the
+      UI must never slow the engine. [E06]
+  [ ] A 60-90 second recording at the top of the README. [F05]
+  [ ] NEW, optional GPU tie-in: render the heatmap from a GPU texture, or
+      run parameter sweeps of the backtester in CUDA [I7]. Only after
+      goals 1-6, and only if you want GPU work on the resume as well.
+
+--------------------------------------------------------------------------------
+6.11 RESEARCH LAYER (WHAT MAKES A QUANT DEVELOPER, NOT ONLY A DEVELOPER)
+--------------------------------------------------------------------------------
+  [ ] Backtester with queue-position fills and injected latency; study
+      hftbacktest's model first. [I2 E8 E9]
+  [ ] Signal normalisation fix, then markout analysis of fills at several
+      horizons. [A7 F1 B06]
+  [ ] Latency-sensitivity study: how adverse selection changes as cancel
+      delay grows from 0 to 100 microseconds in your simulator. [I01]
+  [ ] Fees and rebates in every P&L figure. [J8]
+  [ ] Compare the current market maker with a fixed-spread baseline and
+      with Avellaneda-Stoikov. [I02]
+
+
+================================================================================
+ 7. C++ MASTERY PATH FOR A QUANT DEVELOPER
+================================================================================
+
+Reaching a high level in C++ comes from three habits more than from any
+book: build the primitive yourself, measure it against the library version,
+and read the library's source to see why it differs.
+
+--------------------------------------------------------------------------------
+7.1 SKILL LADDER, WITH A CHECK FROM YOUR OWN CODE AT EACH LEVEL
+--------------------------------------------------------------------------------
+L1  Language core: value categories, move semantics, RAII, rule of zero,
+    const-correctness, undefined behaviour.
+    Check: explain exactly what is copied and allocated when submitOrder
+    returns std::vector<MatchExecReport>.
+
+L2  Memory and hardware: cache lines, alignment, TLB, branch prediction,
+    allocators, object lifetime.
+    Check: MemoryPool maps a T* back to its Slot with reinterpret_cast. Say
+    why that is valid, what the static_assert guarantees, and what
+    std::launder is for.
+
+L3  Concurrency: the memory model, atomics and orderings, false sharing,
+    SPSC / MPSC queues, seqlocks, the ABA problem.
+    Check: nextId_ in OrderManager is atomic and everything else is under a
+    mutex. Which ordering does nextId_ need, and why is it atomic at all?
+
+L4  Generic and compile-time programming: templates, concepts, CRTP,
+    constexpr, type erasure and its cost.
+    Check: replace the std::function callbacks in OrderManager with a
+    template parameter and show the difference in the generated assembly.
+
+L5  Toolchain: compiler flags, sanitizers, perf, flame graphs, Compiler
+    Explorer, llvm-mca, PGO and LTO.
+    Check: explain why `volatile auto reports` in latency_bench changes
+    what is measured, and what benchmark::DoNotOptimize does instead.
+
+L6  Operating system and network: syscalls, scheduling, page faults,
+    sockets, epoll, io_uring, NUMA, kernel bypass.
+    Check: list every reason one sample in your histogram could be 100
+    microseconds when the median is under one.
+
+L7  Domain: market microstructure, order types, exchange protocols, market
+    making, risk, transaction costs.
+    Check: explain why a limit IOC must not trade through its limit price,
+    and what your engine does today [A05].
+
+--------------------------------------------------------------------------------
+7.2 BUILD-IT-YOURSELF EXERCISES (each maps to a part of the engine)
+--------------------------------------------------------------------------------
+  1. SPSC ring buffer           compare: rigtorp, boost, folly, atomic_queue
+  2. Open-addressing hash map   compare: std::unordered_map, unordered_dense
+  3. Arena / pool allocator     compare: your MemoryPool, std::pmr
+  4. Fixed-point decimal type   compare: double; test overflow and rounding
+  5. Small inline vector        compare: std::vector, boost small_vector
+  6. Non-allocating callable    compare: std::function
+  7. Seqlock                    compare: std::mutex, std::atomic<struct>
+  8. Flat order book            compare: your std::map version on ITCH data
+  9. Latency histogram          compare: HdrHistogram_c
+ 10. ITCH decoder               compare: CppTrader's handler
+For each: write it, test it under sanitizers, benchmark both, write half a
+page on why the numbers differ. Ten of these is a serious C++ education and
+most of them go straight into the project.
+
+--------------------------------------------------------------------------------
+7.3 TALKS (all free on YouTube; watch in this order)
+--------------------------------------------------------------------------------
+  Carl Cook, "When a Microsecond Is an Eternity: High Performance Trading
+    Systems in C++", CppCon 2017. The standard introduction, from Optiver.
+  David Gross, "When Nanoseconds Matter: Ultrafast Trading Systems in
+    C++", CppCon 2024 keynote. Also from Optiver; design principles,
+    concurrent data structures, and data-structure optimisation.
+  David Gross, "Trading at light speed: designing low latency systems in
+    C++", Meeting C++ 2022.
+  Charles Frasch, "Single Producer Single Consumer Lock-free FIFO From the
+    Ground Up", CppCon 2023. Watch before exercise 1.
+  Fedor Pikus, "C++ atomics, from basic to advanced", CppCon 2017.
+  Herb Sutter, "atomic<> Weapons", 2012. The memory model.
+  Chandler Carruth, "Efficiency with Algorithms, Performance with Data
+    Structures", CppCon 2014.
+  Mike Acton, "Data-Oriented Design and C++", CppCon 2014.
+  Timur Doumler, "Want fast C++? Know your hardware!", CppCon 2016.
+  Matt Godbolt, "What Has My Compiler Done for Me Lately?", CppCon 2017.
+
+--------------------------------------------------------------------------------
+7.4 BOOKS
+--------------------------------------------------------------------------------
+  Language     Scott Meyers, Effective Modern C++
+               Vandevoorde, Josuttis, Gregor, C++ Templates: The Complete
+                 Guide (2nd edition)
+  Concurrency  Anthony Williams, C++ Concurrency in Action (2nd edition)
+  Performance  Fedor Pikus, The Art of Writing Efficient Programs
+               Denis Bakhvalov, Performance Analysis and Tuning on Modern
+                 CPUs (free online)
+               Ulrich Drepper, What Every Programmer Should Know About
+                 Memory (free paper)
+  Systems      Bryant and O'Hallaron, Computer Systems: A Programmer's
+                 Perspective
+               Kleppmann, Designing Data-Intensive Applications (journals,
+                 replication, recovery: chapters 3, 5, 7, 9)
+  Trading      Sourav Ghosh, Building Low Latency Applications with C++
+               Larry Harris, Trading and Exchanges
+               Cartea, Jaimungal, Penalva, Algorithmic and High-Frequency
+                 Trading
+  Interviews   Xinfeng Zhou, A Practical Guide to Quantitative Finance
+                 Interviews
+
+--------------------------------------------------------------------------------
+7.5 WHAT A QUANT DEVELOPER INTERVIEW ALSO TESTS
+--------------------------------------------------------------------------------
+The project covers C++ and systems design. It does not cover the rest:
+  - Data structures and algorithms under time pressure, written in C++.
+  - Probability, expected value and mental arithmetic (the Zhou book).
+  - Operating systems and networking fundamentals, asked directly.
+  - "Walk me through your project" at the level of memory orderings and
+    cache behaviour. Section 7.1's checks are practice for this.
+Keep a steady weekly share of time for these alongside the project.
+
+
+================================================================================
+ 8. THE NEXT 30 DAYS
+================================================================================
+
+Rule for this period: no new planning documents until ten checklist boxes
+are ticked. You have enough plans. Every item below ends in a commit.
+
+WEEK 1 -- make it visible                                     (goal 1)
+  - Remove the tracked PDF from the repository and its history. Add *.pdf
+    to .gitignore. Commit docs/ and the backlog files.
+  - Write the README: what it is, diagram, build and test commands,
+    accurate status table of every component.
+  - GitHub Actions: Linux GCC and Clang, Windows MSVC, ASan + UBSan job.
+  - Clone and build QuantLib and quill. Run their tests. Pick one issue.
+
+WEEK 2 -- make one thing correct and fast, with proof    (goals 2, 4)
+  - Finish the fixed-point migration through the matching engine.
+  - Doubly linked order list; O(1) cancel in MatchingEngine.
+  - Google Benchmark: cancel at depth 1, 10, 100, 1,000, before and after.
+  - Reference matcher plus the first 100,000 seeded random operations.
+
+WEEK 3 -- real data                                           (goal 3)
+  - Read CppTrader's ITCH handler and itchbook.
+  - ITCH 5.0 decoder with fixtures and a fuzz target.
+  - Rebuild one symbol, then all symbols, from a full-day file.
+  - Record messages per second and memory in docs/PERFORMANCE.md.
+
+WEEK 4 -- first outside contribution and first demo           (goal 6)
+  - Open your first pull request on QuantLib or quill.
+  - Terminal or ImGui view of the top ten levels of one symbol during
+    replay. Record 60 seconds. Put it at the top of the README.
+  - Tag v0.1.
+
+If all four weeks land, my estimate is that the project reaches roughly
+GustGrid's level on the scale in section 3, with a stronger engineering
+story. Goal 5, the full heatmap demo and the latency study then take it
+past.
+
+
+================================================================================
+ 9. SOURCES, METHOD AND LIMITS
+================================================================================
+
+Method
+  - Your project: read on your computer, 16 Nov 2026 (source, git log,
+    existing docs). Not built or run in this session.
+  - GustGrid: cloned and read; not built or run.
+  - Open-source activity: shallow git clones of each repository on
+    16 Nov 2026. Commit and author counts are approximate.
+  - Everything else: web search on the same date, listed below.
+
+Limits
+  - The ratings in sections 3 and 4 are my judgment against the stated
+    scale. Another reviewer could reasonably differ by several points.
+  - I could not open GitHub issue lists directly, so "good first issue"
+    availability is taken from each project's CONTRIBUTING file or search
+    results. Check the labels yourself before choosing.
+  - Performance figures quoted from other projects were measured on their
+    hardware. Reproduce them on yours before comparing.
+  - The talks and books in section 7 are listed from my own knowledge;
+    only the Carl Cook and David Gross talks were re-checked online.
+  - Nothing here promises a hiring outcome.
+
+Sources
+  GustGrid
+    https://github.com/josephHelfenbein/GustGrid
+  Peer HFT projects
+    https://github.com/ASherjil/abt-t2t
+    https://github.com/KareemJandali/itchbook
+    https://github.com/chronoxor/CppTrader
+    https://github.com/kasselouris/CppTrader   (fork with benchmark output)
+    https://trendshift.io/repositories/151530
+  Contribution targets
+    https://github.com/lballabio/QuantLib
+    https://github.com/lballabio/QuantLib/blob/master/CONTRIBUTING.md
+    https://www.quantlib.org/newdeveloper.shtml
+    https://sources.debian.org/src/quantlib/1.40-1/CONTRIBUTING.md
+    https://github.com/odygrd/quill
+    https://quillcpp.readthedocs.io/en/latest/overview.html
+    https://github.com/bloomberg/blazingmq
+    https://github.com/bloomberg/blazingmq/blob/main/CONTRIBUTING.md
+    https://bloomberg.github.io/blazingmq/docs/introduction/overview
+    https://github.com/max0x7ba/atomic_queue
+    https://github.com/rigtorp/SPSCQueue
+    https://github.com/boostorg/lockfree
+    https://github.com/google/benchmark
+    https://github.com/HdrHistogram/HdrHistogram_c
+    https://github.com/quickfix/quickfix
+    https://github.com/crypto-chassis/ccapi
+    https://github.com/databento/databento-cpp
+    https://databento.com/docs/conventions/databento-binary-encoding
+    https://github.com/aeron-io/simple-binary-encoding
+    https://github.com/aeron-io/aeron
+    https://github.com/nautechsystems/nautilus_trader
+    https://nautilustrader.io/docs/latest/developer_guide/
+    https://github.com/nkaz001/hftbacktest
+    https://hftbacktest.readthedocs.io/
+    https://github.com/man-group/ArcticDB
+    https://github.com/scylladb/seastar
+    https://github.com/Xilinx-CNS/onload
+    https://github.com/axboe/liburing
+    https://github.com/llvm/llvm-project
+    https://github.com/eclipse-iceoryx/iceoryx
+    https://projects.eclipse.org/projects/technology.iceoryx
+  Talks
+    https://isocpp.org/blog/2018/09/cppcon-2017-when-a-microsecond-is-an-eternity-high-performance-trading-syst
+    https://cppcon.org/2024-keynote-david-gross/
+    https://www.optiver.com/insights/technology-blog/designing-low-latency-cpp-systems/
+    https://www.meetingcpp.com/2022/Talks/items/Trading_at_light_speed__designing_low_latency_systems_in_Cpp.html
+
+================================================================================
+ END
+================================================================================

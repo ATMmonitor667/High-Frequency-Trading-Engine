@@ -1,0 +1,763 @@
+================================================================================
+ HFT ENGINE -- RESEARCH REPORT, PART 2
+ How to reach 90+ on the rating scale, and open-source contributions
+ chosen for resume value
+ Prepared for: Rahat            Researched: 16 November 2026
+================================================================================
+
+This is research only. Nothing in the code was changed.
+
+Part 1 is docs/HFT_RESEARCH_OPEN_SOURCE_AND_SCALING.txt. It rated GustGrid at
+68 and your engine at about 50, and set six goals that take the engine to
+about 85. This file starts where Part 1 stops:
+  - what separates 85 from 90+, and the specific work that closes it
+  - a wider, re-checked list of open-source projects, ranked by how much a
+    merged contribution is worth on a quant-developer resume
+
+IDs: two-digit IDs such as [A03] are from docs/SCALING_TODO.md. One-digit IDs
+such as [B8] are from HFT_IMPROVEMENT_ISSUES.txt. "Goal 1" to "Goal 6" are
+from Part 1. Upgrades N1 to N15 are new in this file.
+
+CONTENTS
+  1. Summary
+  2. What 90+ means on this scale
+  3. The fifteen upgrades (N1-N15)
+  4. Which upgrades to pick, in what order, and what they cost
+  5. Data and hardware you can get
+  6. Open-source contributions ranked for resume value
+  7. Structured programs (GSoC and others)
+  8. Combined timeline to August 2027
+  9. Sources, method and limits
+
+
+================================================================================
+ 1. SUMMARY
+================================================================================
+
+* Features stop adding points at about 85. From there, each point has to be
+  backed by evidence that someone else can check, or that someone else
+  produced: packets on a real network path, timestamps taken outside your
+  own code, a second implementation that agrees with yours, a stranger who
+  reproduced your numbers, a maintainer who merged your code.
+
+* The 90+ version of this project is a small trading system that replays a
+  full real Nasdaq day over real multicast, quotes against its own
+  exchange over binary order entry, measures tick-to-trade at the network
+  card, survives injected faults under a deterministic simulator, and is
+  released so that other people can reproduce every number. Section 3
+  breaks that into fifteen upgrades. You need about nine of them.
+
+* None of it needs paid data or special hardware to start. Nasdaq publishes
+  sample full-day ITCH files, IEX publishes free daily packet captures,
+  and Databento gives new accounts $125 of historical credit. Software
+  packet timestamps from the Linux kernel work on ordinary network cards.
+
+* For the resume, the strongest contributions are to projects that
+  engineers at trading firms themselves maintain or use. Hudson River
+  Trading's own open-source page names Compiler Explorer, Apache Arrow,
+  pybind11, nanobind, Verilator and others. Point72, Man Group, Bloomberg
+  and XTX Markets all publish C++ projects on GitHub.
+  Section 6 ranks about 40 projects in four tiers.
+
+* My recommended three: Apache Arrow C++ (structured onboarding, named by
+  HRT), Point72's csp (a quant firm's own C++ engine, small team, your
+  pull request gets seen), and QuantLib from Part 1. Add google/benchmark
+  or HdrHistogram_c as a fourth because you will use them daily.
+
+* Order still matters. Every upgrade here depends on Goals 1 to 4 from
+  Part 1. Starting N-items before the README, the fixed-point migration,
+  the ITCH decoder and the measurement harness exist would add scope to a
+  project whose last code commit is 19 August.
+
+
+================================================================================
+ 2. WHAT 90+ MEANS ON THIS SCALE
+================================================================================
+
+Scale (same as Part 1)
+  100  production-grade open source written by specialists
+   85  would stand out among professional engineers' personal work
+   70  strong undergraduate portfolio project
+   50  typical finished course or side project
+
+Scorecard: today, after the six goals, and what 90+ requires
+                                         weight  today  6 goals  90+
+  Technical ambition and difficulty        15     7.0     8.0    9.0
+  Breadth of stack                         15     8.0     8.5    9.0
+  Core technical skill (low latency)       20     4.0     9.0    9.5
+  Domain modelling and correctness         10     5.5     8.5    9.0
+  C++ structure and craftsmanship          10     5.5     8.0    9.0
+  Testing and verification                  5     5.0     8.5    9.5
+  Engineering practice                      5     2.5     8.5    9.0
+  Presentation and demo                    10     1.0     9.0    9.5
+  Completion                               10     4.0     8.5    9.5
+                                          ----   ----    ----   ----
+  Weighted total                           100     50      85     92
+
+What earns a 9 or better in each row
+  Ambition      The problem includes something outside your own process:
+                a real network path, real exchange data at full scale, a
+                second venue, replication, or hardware.
+  Breadth       Feed, book, strategy, risk, order entry, exchange,
+                journal, recovery, measurement and demo all run together
+                as one system, not as separately tested parts.
+  Core skill    Latency measured at the network card, a lock-free
+                structure with a written correctness argument, and at
+                least three optimisations with before/after profiles,
+                one of which failed and is reported anyway.
+  Correctness   Your book agrees with an independent implementation over
+                a full real day. Order-state rules are written as a
+                model and checked.
+  C++           A reviewer from a mature project has read and merged
+                your C++. Interfaces are small, typed and documented.
+                No undefined behaviour under any sanitizer.
+  Testing       Deterministic simulation with fault injection running
+                every night; fuzzers with a saved corpus; every bug ever
+                found has a regression test with its seed.
+  Practice      One command reproduces each published number. Benchmarks
+                run on every change and fail on regression.
+  Demo          A stranger understands it in 90 seconds and can run it
+                in one step.
+  Completion    Tagged release, documentation, licence, and at least
+                one outside person who built it and reported back.
+
+The pattern: the first 85 points are about what you built. The last ten are
+about who else can confirm it.
+
+
+================================================================================
+ 3. THE FIFTEEN UPGRADES
+================================================================================
+
+Each entry: what it is, why it moves the score, what counts as done, and
+what it depends on. Nothing here is implemented.
+
+--------------------------------------------------------------------------------
+PILLAR A -- A HARDER PROBLEM  (ambition, breadth)
+--------------------------------------------------------------------------------
+
+N1  Full-day multicast replay over a real network path
+    What: an exchange-side replayer that reads a Nasdaq ITCH day, frames it
+      in MoldUDP64 with sequence numbers and sends it over UDP multicast at
+      wall-clock pace (and at 10x). Your feed handler receives it in a
+      separate process, ideally on a separate machine or network port.
+      Order entry goes back over OUCH on SoupBinTCP to your matching engine.
+    Why: this turns a library into a system. It is the single change that
+      most separates the top personal project (abt-t2t, Part 1 section 4)
+      from the rest.
+    Done when: a full session replays with zero gaps and zero drops, and
+      the run prints packets sent, received, gaps detected, gaps recovered.
+    Needs: Goals 2 and 3. Extends [D01 D02 D3 F01].
+
+N2  Latency measured at the network card
+    What: take receive and transmit timestamps from the kernel with
+      SO_TIMESTAMPING instead of from your own code. Start with software
+      timestamps, which work on any card. Move to hardware timestamps on a
+      card that supports them (check with `ethtool -T <interface>`).
+      Tick-to-trade becomes: transmit stamp of the order minus receive
+      stamp of the packet that caused it.
+    Then compare transports on identical traffic: blocking sockets, busy
+      polling, io_uring, AF_XDP. AF_XDP has a generic copy mode that works
+      on any device and a driver mode; zero-copy needs driver support, and
+      the socket option XDP_OPTIONS_ZEROCOPY tells you which one you got.
+      Report the mode you measured, not the mode you wanted.
+    Why: it removes the largest weakness in any software benchmark, which
+      is that the timer starts after the expensive part.
+    Done when: docs/PERFORMANCE.md has a full-day histogram to p99.99 and
+      max for at least two transports, with the timestamp source named.
+    Needs: N1, Goal 4. Extends [C03 C6 D5 D6 I05].
+
+N3  A second venue from real captured packets
+    What: add IEX DEEP as a second market-data protocol. IEX publishes
+      its DEEP and TOPS feeds as free daily pcap files, captured at the
+      IEX transport layer, so you replay real exchange packets.
+    Why: one protocol shows you can write a decoder. Two show the
+      architecture is venue-neutral: same book, same strategy, same risk,
+      different adapter. It also forces the adapter contract in [G04].
+    Done when: the same engine binary runs a Nasdaq day and an IEX day
+      selected by configuration, and both pass the conformance checks.
+    Needs: Goal 3.
+
+N4  Journal, snapshot and warm standby
+    What: every input event is journaled before it is applied. A second
+      engine process follows the journal. Kill the primary during replay;
+      the standby takes over. Measure recovery time and prove no order was
+      sent twice and none was lost.
+    Why: the summary of Jane Street's public talk on building an exchange
+      says that working in the single-digit microseconds helped them
+      build a replicated system that is simple and robust.
+      Deterministic single-threaded logic plus a log is the standard
+      shape; showing failover on top of it is rare in personal projects.
+    Done when: a scripted failover drill runs in CI and reports recovery
+      time and a matching state hash.
+    Needs: byte-identical replay [G2 J2]. Extends [H01 H02 H03 H09].
+
+N5  Elective: FPGA ITCH parser
+    What: an ITCH message parser in Verilog or SystemVerilog, simulated
+      with Verilator and tested with cocotb, checked against your C++
+      decoder on the same input. Synthesis for a board is optional.
+    Why: Nasdaq's ITCH specification covers an FPGA version of the feed,
+      and HRT's open-source page lists Verilator, cocotb and Slang among
+      the projects its engineers work on. There is a Quartus-related
+      folder in your home directory, so you may already have the tooling.
+      Choose this only if hardware roles interest you; it is a
+      specialisation, not a requirement for 90.
+    Done when: simulated parser output matches the C++ decoder for a full
+      file, with resource and timing estimates reported.
+
+--------------------------------------------------------------------------------
+PILLAR B -- PROOF OF CORRECTNESS  (domain, testing)
+--------------------------------------------------------------------------------
+
+N6  Deterministic simulation testing, running every night
+    What: feed handler, engine, gateway and exchange run in one process on
+      a virtual clock. A seeded scheduler decides message order and
+      injects loss, duplication, reordering, delay, disconnects and
+      process restarts. Invariants are checked after every step.
+    Model to copy: TigerBeetle's simulator. Their documentation states
+      the two properties that matter: a failure reproduces exactly from a
+      seed and a commit, and simulated time runs far faster than real
+      time, so a minute of simulation covers days of behaviour.
+    Done when: a nightly CI job runs N thousand seeds, any failing seed is
+      filed automatically with its commit, and the README shows total
+      seeds run and bugs found.
+    Needs: single-threaded core and injected time [A08 J5]. Extends
+      [F03 J4] and Part 1 section 6.6.
+
+N7  Agreement with an independent implementation
+    What: after every K messages of a full day, hash your book state and
+      compare it with the state produced by a different codebase on the
+      same file: CppTrader, itchbook, or a book built from Databento's
+      normalised order-by-order data for the same date.
+    Why: your own tests can only find the mistakes you thought of. A
+      second implementation finds the ones you did not.
+    Done when: zero unexplained differences over a full day, with any
+      explained differences documented (for example hidden orders).
+    Needs: Goal 3. Extends [C01 G6].
+
+N8  A checked model of the order state machine
+    What: write the OMS states and the gap-recovery protocol as a TLA+
+      specification and model-check two properties: no fill is counted
+      twice, and no accepted order is forgotten after a reconnect.
+    Why: small (a few hundred lines) and almost never seen in a student
+      project. It also gives you a precise answer to "how do you know the
+      state machine is right?".
+    Done when: the spec, the checker output and a note mapping each
+      spec state to a C++ enum value are in the repository.
+    Needs: [B02].
+
+N9  Continuous fuzzing with a kept corpus
+    What: libFuzzer, AFL++ or Google's FuzzTest on every decoder, the FIX
+      and OUCH parsers and the journal reader. Corpus committed. Coverage
+      reported. Every crash becomes a named regression input.
+    Done when: fuzzers run in CI for a fixed budget per change and
+      nightly for longer, under ASan and UBSan.
+    Extends [C02 G1].
+
+--------------------------------------------------------------------------------
+PILLAR C -- PROOF OF PERFORMANCE  (core skill, engineering practice)
+--------------------------------------------------------------------------------
+
+N10 A performance lab with regression tracking
+    What: one bare-metal Linux machine set up for measurement (isolated
+      cores, interrupts moved, frequency fixed) and a benchmark job that
+      runs on every merge, stores results over time and fails on
+      regression. Tools such as Bencher or github-action-benchmark draw
+      the history chart.
+    Add: hardware counters beside every latency number, and three written
+      case studies. One of the three must be an optimisation that did not
+      help, with the evidence.
+    Done when: the README links a chart of p50 and p99 over the last 50
+      commits.
+    Extends [C04 C06 E04 J9].
+
+N11 Someone else reproduces your numbers
+    What: one script builds, fetches the data sample, runs the benchmarks
+      and writes a report. Ask one other person to run it on different
+      hardware and publish their output next to yours. Joseph is the
+      obvious first person to ask, and you can return the favour by
+      filing the gradient bug from Part 1 on GustGrid with a fix.
+    Why: "reproduced by a second party on different hardware" is a
+      sentence almost no personal project can write.
+    Done when: docs/PERFORMANCE.md has a table with two machines and two
+      names.
+
+--------------------------------------------------------------------------------
+PILLAR D -- OUTSIDE VERIFICATION  (craft, demo, completion)
+--------------------------------------------------------------------------------
+
+N12 Ship it as a product
+    What: tagged v1.0, changelog, licence, documentation site, a dev
+      container, and the two most reusable parts published as standalone
+      libraries with vcpkg or Conan recipes: the SPSC queue and the ITCH
+      decoder. Several standalone C++ ITCH parsers I checked were last
+      touched in 2021-2022, and CppTrader's handler comes with its own
+      dependency stack, so a tested, fuzzed, documented, dependency-free
+      one could attract real users.
+    Done when: someone you do not know opens an issue or a pull request.
+
+N13 Publish the engineering
+    What: three articles: the measurement method, one optimisation case
+      study, and the simulation-testing story with a real bug it found.
+      Post them where practitioners read. The author of abt-t2t (Part 1)
+      posted that work on the quant and high-frequency-trading
+      subreddits. Give a ten-minute talk at a local C++ meetup.
+    Done when: three articles are public and linked from the README.
+
+N14 Have professionals review your C++
+    What: merged pull requests in two projects from section 6. This is
+      the cheapest way to get your code read by engineers who do this for
+      a living, and it is the only item here that someone else signs.
+    Done when: two merged, non-trivial pull requests are linked from your
+      resume.
+
+N15 One research result on real data
+    What: the latency-sensitivity study [I01] run on real order-by-order
+      data rather than synthetic ticks: how fill quality and adverse
+      selection change as cancel delay grows, with assumptions, fees and
+      uncertainty stated. Negative or inconclusive results count.
+    Done when: a short paper-style report with reproducible configs.
+    Needs: backtester with queue position [I2 E9], N7.
+
+
+================================================================================
+ 4. WHICH UPGRADES TO PICK, IN WHAT ORDER, AND WHAT THEY COST
+================================================================================
+
+Which rows each upgrade moves
+              Amb  Brd  Skill  Dom  C++  Test  Prac  Demo  Compl
+  N1 replay    X    X     X                            X
+  N2 wire lat  X          X                     X
+  N3 2nd venue X    X            X    X
+  N4 standby   X    X            X          X
+  N5 FPGA      X    X     X
+  N6 DST                         X          X
+  N7 agree                       X          X
+  N8 TLA+                        X          X
+  N9 fuzzing                          X     X    X
+  N10 perf lab            X                      X
+  N11 repro                                      X           X
+  N12 release                         X          X     X     X
+  N13 writing                                          X     X
+  N14 review                          X                      X
+  N15 research X                 X                     X
+
+Minimum set for 90: N1, N2, N6, N7, N10, N11, N12, N13, N14.
+To be safely above 90 add one of N3 or N4, and one of N8 or N15.
+N5 is a separate specialisation and replaces nothing.
+
+Rough effort (my planning estimates, not measurements; focused hours)
+  N1  40-70     N6  40-70     N11  8-15
+  N2  30-50     N7  15-25     N12  25-40
+  N3  25-40     N8  15-30     N13  20-30
+  N4  40-70     N9  15-25     N14  30-60
+  N5  60-120    N10 25-40     N15  40-70
+  Minimum set: roughly 230-400 hours after the six goals are done.
+  At 12-15 hours a week that is five to seven months.
+
+Order
+  1. Goals 1-4 from Part 1. Nothing below starts before these.
+  2. N14 in parallel from now, at about one fifth of your time. It has the
+     longest calendar delay because other people's review is involved.
+  3. N7, then N9. Cheap, and they protect everything that follows.
+  4. N1, then N2. The centrepiece.
+  5. N6. Easier once N1 gives you a clear network boundary to simulate.
+  6. N10, N11.
+  7. N3 or N4.
+  8. N12, N13. Release and write-up last, when the numbers are final.
+
+What would make me rate it below 90 even with all of this
+  - A published number that a reader cannot reproduce.
+  - A claim on the resume that the repository does not support.
+  - Tests you cannot explain line by line.
+  - Any of it built on the double-priced, mutex-guarded core as it stands
+    today. The base has to be fixed first.
+
+
+================================================================================
+ 5. DATA AND HARDWARE YOU CAN GET
+================================================================================
+
+Data
+  Nasdaq sample ITCH days (free)
+    Nasdaq hosts a public directory of sample TotalView-ITCH 5.0 files at
+    emi.nasdaq.com/ITCH/Nasdaq ITCH/. One file listed there,
+    01302019.NASDAQ_ITCH50.gz, is 4.76 GB compressed. Nasdaq's FAQ says
+    5.0 files average 5-10 GB compressed and 15-25 GB uncompressed. Older
+    tutorials give an ftp:// address for the same directory. The
+    official historical product (rolling T+1 files) is a subscription
+    service; you do not need it.
+  IEX HIST (free)
+    IEX offers DEEP and TOPS for download the day after trading, with the
+    trailing twelve months kept available, as pcap files captured at the
+    IEX transport protocol layer. Use is subject to the IEX Historical
+    Data Terms of Use. Good for N3 and for packet-level replay.
+  Databento (free credit, then paid)
+    New accounts get $125 of historical-data credit, usable on Nasdaq
+    TotalView-ITCH including order-by-order data. The credit is one per
+    team and expires after six months, and a payment method is required
+    at sign-up, so create the account only when N7 or N15 is ready to use
+    it. Their C++ client is one of the contribution targets in Part 1.
+  Rules for all three: read the terms before redistributing anything.
+  Commit small fixtures you created yourself, never vendor files. Record
+  the file name, date and checksum of every dataset behind a published
+  number [D03].
+
+Hardware
+  Needed for N1, N2, N10: one Linux machine you control (not WSL, not a
+    shared cloud VM) for measurement. A second machine or a second network
+    port with a direct cable makes N1 and N2 much more convincing.
+  Timestamps: run `ethtool -T` on each interface to see whether it
+    reports hardware receive and transmit timestamping. Software
+    timestamps are enough to begin.
+  AF_XDP zero-copy depends on the card's driver. Check before buying.
+  Solarflare cards with Onload and ef_vi are what abt-t2t used. They are
+    the professional tool and are not required for 90. Treat them as a
+    later purchase, after software measurement has shown the network
+    stack is your bottleneck.
+  FPGA (N5): simulation with Verilator needs no board.
+
+Study material specific to this stage (beyond Part 1 section 7)
+  Jane Street, "How to Build an Exchange" (talk and transcript).
+  Jane Street, Signals and Threads podcast, "Multicast and the Markets"
+    with Brian Nigito, 2020. Why exchanges are built on sequenced
+    multicast.
+  TigerBeetle documentation, "Deterministic Simulation Testing", and
+    their 2026 post on protocol-aware simulation.
+  Linux kernel documentation: networking/timestamping and
+    networking/af_xdp.
+  Nasdaq specifications: TotalView-ITCH 5.0, MoldUDP64, OUCH 5.0,
+    SoupBinTCP.
+
+
+================================================================================
+ 6. OPEN-SOURCE CONTRIBUTIONS RANKED FOR RESUME VALUE
+================================================================================
+
+How I ranked them
+  Resume value = (who recognises the project) x (how hard the review is)
+  x (chance of a merge within two months). A merged pull request in a
+  project that trading-firm engineers maintain or depend on is worth more
+  than ten in a project nobody on the interview panel has heard of.
+
+Activity figures: shallow git clones on 16 Nov 2026; commits and distinct
+authors since mid-May 2026, merge commits included. Approximate.
+
+Evidence of what trading firms touch
+  Hudson River Trading's open-source page names projects its engineers
+  maintain or contribute to: Compiler Explorer (created by Matt Godbolt),
+  Apache Arrow, pybind11, nanobind, corral, Slang, Verilator, cocotb,
+  Polars, Ruff, mypy and others. A public leaderboard of quant-firm GitHub
+  organisations (kadoa.com) has these C++ or C++-core projects near the
+  top: Man Group's ArcticDB, XTX Markets' ternfs, Point72's csp and HRT's
+  slang-server. Jane Street leads overall but publishes in OCaml.
+
+--------------------------------------------------------------------------------
+TIER S -- PROJECTS PUBLISHED OR MAINTAINED BY TRADING FIRMS' ENGINEERS
+--------------------------------------------------------------------------------
+
+S1. csp                         github.com/Point72/csp        C++ / Python
+    Point72's stream-processing library: a C++ graph engine driven from
+    Python, used so research and production share one code path. Open
+    since June 2024; Point72 said it published it partly to attract
+    talent. Apache-2.0. ~70 commits, 6 authors.
+    Why first: a hedge fund's own C++ engine, a small maintainer team, so
+    a good pull request is read by the people you want to be read by.
+    Start with: adapters (its wiki has listed Redis and websocket
+    adapter work), documentation, build fixes on a platform they test
+    less.
+
+S2. Apache Arrow (C++)          github.com/apache/arrow       C++
+    The columnar data format under most data tooling. Named on HRT's
+    page. ~720 commits, 164 authors.
+    Onboarding: an official New Contributor's Guide, and a
+    "good-first-issue" label for issues meant to take a weekend or less.
+    Start with: the guide's step-by-step first pull request, then compute
+    kernels or the fuzzing targets.
+
+S3. pybind11 and nanobind       github.com/pybind/pybind11    C++
+                                github.com/wjakob/nanobind    C++
+    The two libraries that bind C++ to Python. Both named on HRT's page.
+    ~130 commits / 28 authors and ~280 / 22.
+    Why: every quant stack has a C++ core and Python research on top.
+    Binding your own order book to Python with nanobind is a useful
+    project feature and the natural way to find something to fix.
+    Level: heavy template code. Good for C++ depth, hard for a first PR.
+
+S4. Compiler Explorer           github.com/compiler-explorer/compiler-explorer
+    The tool every C++ engineer uses, created by an HRT engineer.
+    ~620 commits, 152 authors: the most open contributor base on this
+    list. Mostly TypeScript, so it shows engagement with the C++
+    community rather than C++ skill. Adding a library or a compiler
+    configuration is a common first contribution.
+
+S5. ArcticDB                    github.com/man-group/ArcticDB C++ core
+    Man Group's time-series database; the most-starred C++ project from a
+    quant firm. ~220 commits, 16 authors. Check the licence first.
+
+S6. BlazingMQ                   github.com/bloomberg/blazingmq  C++
+    From Part 1. Still the best-documented newcomer path of any
+    finance-firm C++ project ("good first issue" label, DCO sign-off).
+
+S7. Verilator, Slang, slang-server                             C++
+    github.com/verilator/verilator       ~1,500 commits, 135 authors
+    github.com/MikePopoloski/slang       ~370 commits, 37 authors
+    github.com/hudson-trading/slang-server  ~160 commits, 19 authors
+    Hardware-design tools written in C++. Slang's founder and the
+    slang-server project are at HRT. Only relevant if you take the FPGA
+    elective (N5), in which case they are the best targets on the list.
+
+S8. Harder, for later
+    github.com/XTXMarkets/ternfs    C++ distributed file system, 8 authors
+    github.com/hudson-trading/corral  C++ coroutine library, ~5 commits
+    github.com/aeron-io/aeron        from Part 1
+
+--------------------------------------------------------------------------------
+TIER A -- WIDELY RECOGNISED HIGH-PERFORMANCE C++ WITH REAL ONBOARDING
+--------------------------------------------------------------------------------
+
+A1. ClickHouse                  github.com/ClickHouse/ClickHouse   C++
+    Column-store database. Its developer documentation links directly to
+    open issues labelled "easy task", every contributor is recorded in a
+    system table, a bot handles the CLA, and each pull request runs
+    about 50 CI jobs. Tests start once an employee marks the pull request
+    as testable.
+    Cost: the repository and build are very large. Budget a weekend just
+    to build it.
+
+A2. DuckDB                      github.com/duckdb/duckdb           C++
+    In-process analytical database. Extremely active, 300+ authors in six
+    months. Clean modern C++ and fast review. Good for vectorised
+    execution and data-structure work.
+
+A3. LLVM                        github.com/llvm/llvm-project       C++
+    Many open "good first issue" items at any time, a lot of them small
+    missed optimisations in the optimiser. The deepest C++ and
+    compiler education available, and universally recognised.
+
+A4. fmt                         github.com/fmtlib/fmt              C++
+    The formatting library behind std::format. ~260 commits, 67 authors.
+    Small, exemplary modern C++, very responsive maintainer.
+
+A5. RocksDB                     github.com/facebook/rocksdb        C++
+    ~490 commits, 46 authors. Storage engine used inside many databases.
+    Relevant to your journal and tick store.
+
+A6. Seastar family              C++20
+    github.com/scylladb/seastar       from Part 1
+    github.com/redpanda-data/redpanda ~1,700 commits, 55 authors
+    github.com/scylladb/scylladb      thousands of commits, 74 authors
+    Thread-per-core systems. Closest in design to a trading engine among
+    the large projects. Steep.
+
+A7. Smaller and friendlier
+    github.com/apache/kvrocks        C++, ~140 commits, 38 authors
+    github.com/dragonflydb/dragonfly C++, ~950 commits, 47 authors
+    github.com/catchorg/Catch2       C++, ~80 commits, 18 authors
+    github.com/google/fuzztest       C++, ~190 commits, 14 authors
+    Kvrocks is an Apache project with a high ratio of authors to commits,
+    which usually means outside pull requests get merged.
+
+A8. Networking
+    github.com/xdp-project/xdp-tools  C, ~30 commits, 10 authors
+    github.com/DPDK/dpdk              C, ~1,900 commits, 201 authors
+      (patches go through a mailing list, not GitHub)
+    github.com/axboe/liburing         from Part 1
+    Natural targets while doing N2.
+
+--------------------------------------------------------------------------------
+TIER B -- FINANCE AND TRADING DOMAIN
+--------------------------------------------------------------------------------
+
+B1. QuantLib, quill, databento-cpp, ccapi, Simple Binary Encoding
+    All from Part 1 and all still active. QuantLib and quill remain the
+    best first two for domain fit.
+
+B2. Perspective                 github.com/finos/perspective   C++ / Rust / JS
+    Streaming analytics and visualisation engine, first built at
+    J.P. Morgan and now hosted by the Fintech Open Source Foundation. The
+    query engine is C++ compiled to WebAssembly and to a Python module.
+    ~245 commits, 5 authors.
+    Rules: a FINOS contributor agreement before your first pull request;
+    tests, documentation, and benchmarks for any C++ change.
+    Bonus: it is a ready-made way to build your live dashboard (Goal 6).
+
+B3. Tools you will use for sections 3 and 4
+    github.com/google/benchmark, github.com/HdrHistogram/HdrHistogram_c
+    github.com/ocornut/imgui (~460 commits, 39 authors)
+    github.com/epezent/implot (~45 commits, 8 authors)
+    Fixes you hit while using them are the most natural contributions.
+
+--------------------------------------------------------------------------------
+TIER C -- READ, USE OR BENCHMARK AGAINST; DO NOT PLAN ON MERGES
+--------------------------------------------------------------------------------
+  Last commit on the default branch in brackets.
+  chronoxor/CppTrader (Nov 2026, 8 commits in six months)
+  quickfix/quickfix (May 2026)
+  nkaz001/hftbacktest (Dec 2025)
+  wondertrader/wondertrader (Sep 2026, 3 commits in six months)
+  ctubio/Krypto-trading-bot (Dec 2024)
+  MengRao/tscns and fmtlog (Feb 2025), MengRao/SPSC_Queue (Apr 2022):
+    small low-latency utilities by a trading developer; worth reading.
+  fix8/fix8 (May 2023), OpenMAMA (Nov 2023), jvirtanen/parity (Feb 2022),
+  charles-cooper/itch-order-book (Jun 2022), martinobdl/ITCH (Oct 2021)
+  optiver/timestamp9 (Oct 2023), janestreet/magic-trace (May 2026; OCaml,
+    but an excellent tool to use on your own engine)
+
+--------------------------------------------------------------------------------
+WHAT MAKES A CONTRIBUTION COUNT ON A RESUME
+--------------------------------------------------------------------------------
+  Counts
+    - A bug fix with a test that fails before and passes after.
+    - A measured performance improvement, with the benchmark included.
+    - A feature the maintainers asked for in an issue.
+    - Sustained presence: three pull requests in one project beat one
+      each in three.
+  Does not count, and can hurt
+    - Typo and whitespace pull requests listed as "contributions".
+    - Large unsolicited rewrites.
+    - Pull requests you cannot defend line by line. Maintainers reject
+      these quickly, and GCC states outright that proposals written
+      entirely with generative AI are rejected. Use AI to understand a
+      codebase; write and own the change yourself.
+  How to write it
+    "Apache Arrow (C++): fixed <what> in <component>, added regression
+     test (merged, PR #N)" with a link. One line per project, strongest
+     first, under an "Open Source" heading.
+
+My recommended set
+  Now          Arrow C++ (follow the New Contributor's Guide end to end)
+               QuantLib (first "help wanted" issue)
+  From month 2 csp (small firm-owned C++ engine)
+  Alongside    google/benchmark or HdrHistogram_c, whichever bug you hit
+  If FPGA      Verilator or slang-server instead of csp
+  Target: four merged pull requests across two or three projects by the
+  end of March 2027, in time for GSoC proposals and autumn recruiting.
+
+
+================================================================================
+ 7. STRUCTURED PROGRAMS
+================================================================================
+
+Google Summer of Code 2027
+  A paid summer project inside an open-source organisation with a mentor.
+  People commonly list it on a resume alongside internships.
+  Dates: Google had not announced the 2027 timeline as of mid-November
+    2026. The 2026 cycle ran: organisations announced 19 February,
+    applications 16-31 March, coding from 25 May, 185 organisations.
+    Expect the same shape.
+  Eligibility in 2026: 18 or older, and a student or a newcomer to open
+    source.
+  C and C++ organisations in 2026 included GCC and CERN-HSF, an umbrella
+    for physics software that has hosted C++ tooling projects such as
+    Clad and CppInterOp. The 2027 list appears in February; check it for
+    LLVM, Boost and the projects in section 6.
+  How selection works in practice: organisations favour applicants who
+    are already contributing. GCC's own guidance says contributions and
+    community interaction weigh heavily when candidates are chosen. That
+    is the reason to start in November rather than March.
+  Plan: pick the organisation by January, have two merged pull requests
+    there by the time organisations are announced, discuss your proposal
+    with a mentor before the application window opens.
+
+Others to check for eligibility and dates
+  MLH Fellowship. G-Research, a quant firm, funds an open-source
+    fellowship track through Major League Hacking.
+  LFX Mentorship (Linux Foundation) and Outreachy run on similar lines.
+  I did not verify 2027 terms for these three.
+
+
+================================================================================
+ 8. COMBINED TIMELINE TO AUGUST 2027
+================================================================================
+
+Planning sketch at 12-15 hours a week. Adjust to your semester.
+
+  Nov-Dec 2026   Goals 1 and 2 (Part 1 weeks 1-2). Build Arrow and
+                 QuantLib locally. First pull request opened.
+  Jan 2027       Goals 3 and 4: ITCH full-day replay, measurement
+                 harness. Second pull request. Choose GSoC organisation.
+  Feb 2027       N7 and N9. First demo video (Goal 6, simple version).
+                 Tag v0.1. GSoC organisations announced: confirm choice.
+  Mar 2027       Goal 5 (SPSC queue). GSoC proposal. Start csp.
+  Apr-May 2027   N1 then N2. This is the centrepiece; protect the time.
+  Jun-Jul 2027   N6, N10, N11. GSoC coding if accepted (then slow the
+                 engine work and let GSoC carry the open-source side).
+  Aug 2027       N12, N13. Tag v1.0 before autumn applications open.
+  Later          N3 or N4, N8 or N15.
+
+  Checkpoint scores, if each stage lands: about 70 by February, about 85
+  by April, 90+ by August. These are my estimates on my own scale.
+
+
+================================================================================
+ 9. SOURCES, METHOD AND LIMITS
+================================================================================
+
+Method
+  - Repository activity: shallow git clones on 16 Nov 2026.
+  - Everything else: web search and page fetches on the same date.
+  - Your code was not re-read for this part; section 2's "today" column is
+    carried over from Part 1.
+
+Limits
+  - Scores are my judgment against the stated scale.
+  - Hour estimates are planning figures, not measurements.
+  - I could not open GitHub issue lists, so I could not count open
+    beginner issues per project. Labels are taken from each project's
+    own documentation.
+  - Commit counts from shallow clones include merges and bot commits and
+    overstate activity for some repositories.
+  - I did not verify which network cards support hardware timestamps or
+    AF_XDP zero-copy; check your own hardware.
+  - Data terms change. Read each provider's current terms.
+  - GSoC 2027 dates and organisations are not yet announced.
+  - Nothing here promises a hiring outcome.
+
+Sources
+  Rating context and peer projects
+    Part 1: docs/HFT_RESEARCH_OPEN_SOURCE_AND_SCALING.txt
+    https://github.com/ASherjil/abt-t2t
+    https://trendshift.io/repositories/80291
+  Data
+    https://emi.nasdaq.com/ITCH/Nasdaq%20ITCH
+    https://m.nasdaqtrader.com/Content/TechnicalSupport/FAQs/ITCH_FAQ.pdf
+    https://nasdaqtrader.com/content/technicalsupport/specifications/dataproducts/NQTVITCHspecification.pdf
+    https://m.nasdaqtrader.com/Trader.aspx?id=ITCH
+    https://iextrading.com/trading/alerts/2017/014/
+    https://iextrading.com/trading/market-data/
+    https://databento.com/pricing
+    https://databento.com/docs/faqs/usage-pricing-and-data-credits.md
+    https://databento.com/blog/why-payment-information-required
+    https://databento.com/catalog/us-equities
+  Techniques
+    https://docs.tigerbeetle.com/about/vopr
+    https://tigerbeetle.com/blog/2026-08-20-protocol-aware-dst
+    https://kernel.org/doc/Documentation/networking/af_xdp.rst
+    https://doc.dpdk.org/guides/_sources/nics/af_xdp.rst.txt
+    https://www.kernel.org/doc/Documentation/networking/timestamping.rst
+    https://www.janestreet.com/tech-talks/building-an-exchange/
+    https://signalsandthreads.com/multicast-and-the-markets
+  Trading firms and open source
+    https://www.hudsonrivertrading.com/open-source-at-hrt/
+    https://www.kadoa.com/quant/open-source
+    https://point72.com/blog/point72-launches-its-first-open-source-library/
+    https://github.com/Point72/csp
+    https://www.gresearch.com/news/how-g-research-invests-in-open-source-for-long-term-impact
+  Contribution guides
+    https://arrow.apache.org/docs/developers/guide/
+    https://arrow.apache.org/docs/developers/guide/step_by_step/finding_issues.html
+    https://clickhouse.com/docs/resources/develop-contribute/introduction/developer-instruction
+    https://altinity.com/webinarspage/building-clickhouse-and-making-your-first-contribution-a-tutorial
+    https://github.com/finos/perspective/blob/v2.2.0/CONTRIBUTING.md
+    https://goodfirstissue.org/languages/cpp
+  Programs
+    https://opensource.googleblog.com/2026/02/introducing-the-185-organizations-for-gsoc-2026.html
+    https://opensource.org/?p=323472
+    https://gcc.gnu.org/wiki/SummerOfCode
+    https://hepsoftwarefoundation.org/activities/gsoc
+    https://www.masaischool.com/resources/google-summer-of-code-2027-guide
+
+================================================================================
+ END
+================================================================================
